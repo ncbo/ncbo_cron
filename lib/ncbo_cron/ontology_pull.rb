@@ -105,7 +105,7 @@ module NcboCron
           new_sub.version = new_version
         end
 	unless new_released.nil?
-          new.sub.released = DateTime.now
+          new_sub.released = DateTime.now
 	end
         new_sub.submissionStatus = nil
         new_sub.creationDate = nil
