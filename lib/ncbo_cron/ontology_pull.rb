@@ -88,7 +88,7 @@ module NcboCron
       end
 
       def create_submission(ont, sub, file, filename, logger=nil,
-                            add_to_pull=true,new_version=nil)
+			    add_to_pull=true,new_version=nil,new_released=nil)
         logger ||= Kernel.const_defined?("LOGGER") ? Kernel.const_get("LOGGER") : Logger.new(STDOUT)
         new_sub = LinkedData::Models::OntologySubmission.new
 
@@ -104,9 +104,11 @@ module NcboCron
         unless new_version.nil?
           new_sub.version = new_version
         end
+	unless new_released.nil?
+          new.sub.released = DateTime.now
+	end
         new_sub.submissionStatus = nil
         new_sub.creationDate = nil
-        new_sub.released = DateTime.now
         new_sub.missingImports = nil
         new_sub.metrics = nil
 

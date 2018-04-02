@@ -22,7 +22,11 @@ puts "Running on #{platform} platform"
 
 umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
 umls_files = Dir.glob(File.join(umls_files_path, "*.ttl"))
-new_version = "2014AB"
+
+# UMLS Release Details.  Update this for new release
+new_version = "2017AB"
+new_released = "2017-05-09" #Release date
+
 file_index = {}
 umls_files.each do |x|
   if not x["semantictypes"].nil?
@@ -61,6 +65,6 @@ new_submissions.each_key do |acr|
   ont, sub, file = new_submissions[acr]
   filename = file.split("/")[-1]
   pull.create_submission(ont,sub,file,filename,logger=nil,
-                         add_to_pull=false,new_version)
+                         add_to_pull=false,new_version,new_released)
   puts "Created new submission for #{acr}"
 end
