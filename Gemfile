@@ -24,9 +24,9 @@ gem 'ffi', '< 1.9.22'
 gem 'cube-ruby', require: 'cube'
 
 # NCBO gems (can be from a local dev path or from rubygems/git)
-gem 'goo', github: 'ncbo/goo', branch: 'staging'
-gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'staging'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'staging'
+gem 'goo', git: 'https://github.com/ncbo/goo.git', branch: 'allegrograph_testing'
+gem 'sparql-client', git: 'https://github.com/ncbo/sparql-client.git', branch: 'allegrograph_testing'
+gem 'ontologies_linked_data', git: 'https://github.com/ncbo/ontologies_linked_data.git', branch: 'allegrograph_testing'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'staging'
 gem 'ncbo_resource_index', github: 'ncbo/resource_index'
 

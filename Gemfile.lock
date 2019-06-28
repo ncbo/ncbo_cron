@@ -1,7 +1,7 @@
 GIT
-  remote: git://github.com/ncbo/goo.git
-  revision: 1186bccfb65303db0fe881e1857508fbf7e30e61
-  branch: staging
+  remote: https://github.com/ncbo/goo.git
+  revision: 9cb9d82ab52a4746eab3098d1e02f9be3c970571
+  branch: allegrograph_testing
   specs:
     goo (0.0.2)
       addressable (= 2.3.5)
@@ -15,7 +15,7 @@ GIT
       uuid
 
 GIT
-  remote: git://github.com/ncbo/ncbo_annotator.git
+  remote: https://github.com/ncbo/ncbo_annotator.git
   revision: f0f05a2403ae5f9fea2e8fa4c8321aa3db3d1cec
   branch: staging
   specs:
@@ -26,9 +26,9 @@ GIT
       ruby-xxHash
 
 GIT
-  remote: git://github.com/ncbo/ontologies_linked_data.git
-  revision: 0991d0a4091b9941ccb5b5af29e6219e7238cfb4
-  branch: staging
+  remote: https://github.com/ncbo/ontologies_linked_data.git
+  revision: 1ca9b9ae9744807e7889a1ee208ddd6cf4719aac
+  branch: allegrograph_testing
   specs:
     ontologies_linked_data (0.0.1)
       activesupport
@@ -47,7 +47,7 @@ GIT
       rubyzip
 
 GIT
-  remote: git://github.com/ncbo/resource_index.git
+  remote: https://github.com/ncbo/resource_index.git
   revision: 75e384e2563638cb91541082c9256f80b60b6ae9
   specs:
     ncbo_resource_index (0.0.1)
@@ -60,9 +60,9 @@ GIT
       typhoeus
 
 GIT
-  remote: git://github.com/ncbo/sparql-client.git
-  revision: 3b7e2b14c83a6ffde90c6f7e78c3b5767c2e3a4c
-  branch: staging
+  remote: https://github.com/ncbo/sparql-client.git
+  revision: 9e0012652e0b95eae72f13d514cfc2faa702296e
+  branch: allegrograph_testing
   specs:
     sparql-client (1.0.1)
       json_pure (>= 1.4)
@@ -93,7 +93,7 @@ GEM
       thread_safe (~> 0.1)
       tzinfo (~> 0.3.37)
     addressable (2.3.5)
-    bcrypt (3.1.12)
+    bcrypt (3.1.13)
     builder (3.2.3)
     coderay (1.1.2)
     concurrent-ruby (1.1.5)
@@ -145,13 +145,13 @@ GEM
       concurrent-ruby (~> 1.0)
     json (2.2.0)
     json_pure (2.2.0)
-    jwt (2.1.0)
+    jwt (2.2.1)
     launchy (2.4.3)
       addressable (~> 2.3)
     libxml-ruby (3.1.0)
     logger (1.3.0)
-    macaddr (1.7.1)
-      systemu (~> 2.6.2)
+    macaddr (1.7.2)
+      systemu (~> 2.6.5)
     mail (2.6.6)
       mime-types (>= 1.16, < 4)
     memoist (0.16.0)
@@ -183,7 +183,7 @@ GEM
     rake (12.3.2)
     rdf (1.0.8)
       addressable (>= 2.2)
-    redis (4.1.1)
+    redis (4.1.2)
     ref (2.0.0)
     representable (3.0.4)
       declarative (< 0.1.0)
@@ -198,10 +198,10 @@ GEM
       builder (>= 2.1.2)
       faraday (>= 0.9.0)
     ruby-xxHash (0.4.0.1)
-    rubyzip (1.2.2)
+    rubyzip (1.2.3)
     rufus-scheduler (2.0.24)
       tzinfo (>= 0.3.22)
-    sequel (5.20.0)
+    sequel (5.21.0)
     signet (0.11.0)
       addressable (~> 2.3)
       faraday (~> 0.9)
@@ -252,4 +252,4 @@ DEPENDENCIES
   test-unit-minitest
 
 BUNDLED WITH
-   2.0.1
+   2.0.2
