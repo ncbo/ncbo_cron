@@ -32,15 +32,21 @@ Annotator.config do |config|
 end
 
 NcboCron.config do |config|
+  # see https://github.com/ncbo/ncbo_cron/blob/master/lib/ncbo_cron/config.rb for default config
   config.redis_host  ||= "localhost"
   config.redis_port  ||= 6379
   config.search_index_all_url = "http://localhost:8983/solr/term_search_core2"
   config.property_search_index_all_url = "http://localhost:8983/solr/prop_search_core2"
 
   # Ontologies Report config
+  config.enable_ontologies_report  = true
   config.ontology_report_path = "./test/reports/ontologies_report.json"
 
+  # Remove graphs from deleted ontologies when running process_flush_classes
+  config.remove_zombie_graphs      = false
+
   # Google Analytics config
+  config.enable_ontology_analytics = false
   config.analytics_service_account_email_address = "123456789999-sikipho0wk8q0atflrmw62dj4kpwoj3c@developer.gserviceaccount.com"
   config.analytics_path_to_key_file              = "config/bioportal-analytics.p12"
   config.analytics_profile_id                    = "ga:1234567"

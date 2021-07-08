@@ -28,6 +28,8 @@ module NcboCron
     @settings.enable_processing ||= true
     @settings.enable_pull ||= true
     @settings.enable_flush ||= true
+    # Don't remove graphs from deleted ontologies by default when flushing classes
+    @settings.remove_zombie_graphs ||= false
     @settings.enable_warmq ||= true
     @settings.enable_mapping_counts ||= true
     # enable ontology analytics
