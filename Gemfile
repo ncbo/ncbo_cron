@@ -14,7 +14,7 @@ gem 'google-api-client', '~> 0.10'
 gem 'parseconfig'
 gem 'mail', '2.6.6'
 gem 'rest-client'
-gem 'ffi', '< 1.9.22'
+gem 'ffi', '< 1.9.25'
 
 # JIRA
 # gem 'jira-ruby'

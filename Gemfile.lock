@@ -133,7 +133,7 @@ GEM
     faraday-net_http (1.0.1)
     faraday-net_http_persistent (1.1.0)
     faraday-patron (1.0.0)
-    ffi (1.9.21)
+    ffi (1.9.24)
     google-api-client (0.10.3)
       addressable (~> 2.3)
       googleauth (~> 0.5)
@@ -248,7 +248,7 @@ PLATFORMS
 DEPENDENCIES
   cube-ruby
   email_spec
-  ffi (< 1.9.22)
+  ffi (< 1.9.25)
   goo!
   google-api-client (~> 0.10)
   mail (= 2.6.6)
