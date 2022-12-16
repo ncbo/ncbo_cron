@@ -136,6 +136,9 @@ opt_parser = OptionParser.new do |opts|
   opts.on("-f", "--flush-old-graphs SCHED", String, "cron schedule to delete class graphs of archive submissions", "(default: #{options[:cron_flush]})") do |c|
     options[:cron_flush] = c
   end
+  opts.on("--remove-zombie-graphs", "flush class graphs from deleted ontology submissions", "(default: #[options[:remove_zombie_graphs]})") do |v|
+    options[:remove_zombie_graphs] = true
+  end
   opts.on("-w", "--warm-long-queries SCHED", String, "cron schedule to warmup long time running queries", "(default: #{options[:cron_warmq]})") do |c|
     options[:cron_warmq] = c
   end  
@@ -313,7 +316,7 @@ runner.execute do |opts|
         logger.info "Logging flush details to #{flush_log_path}"; logger.flush
         t0 = Time.now
         parser = NcboCron::Models::OntologySubmissionParser.new
-        flush_onts = parser.process_flush_classes(flush_logger)
+        flush_onts = parser.process_flush_classes(flush_logger, flush_options[:remove_zombie_graphs])
         logger.info "Flushed #{flush_onts.length} submissions in #{Time.now - t0} sec."; logger.flush
         logger.info "Finished flush"; logger.flush
       end

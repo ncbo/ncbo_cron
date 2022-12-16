@@ -79,6 +79,7 @@ module NcboCron
         "#{IDPREFIX}#{id}"
       end
 
+      # Zombie graphs are submission graphs from ontologies that have been deleted
       def zombie_classes_graphs
         query = "SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o }}"
         class_graphs = []
@@ -98,7 +99,7 @@ module NcboCron
         zombies
       end
 
-      def process_flush_classes(logger)
+      def process_flush_classes(logger, remove_zombie_graphs=false)
         onts = LinkedData::Models::Ontology.where.include(:acronym,:summaryOnly).all
         status_archived = LinkedData::Models::SubmissionStatus.find("ARCHIVED").first
         deleted = []
@@ -141,6 +142,12 @@ module NcboCron
 
         zombie_classes_graphs.each do |zg|
           logger.info("Zombie class graph #{zg}"); logger.flush
+          # Not deleting zombie graph by default
+          if !remove_zombie_graphs.nil? && remove_zombie_graphs == true
+            Goo.sparql_data_client.delete_graph(RDF::URI.new(zg))
+            logger.info "DELETED #{zg} graph"
+            deleted << zg
+          end
         end
 
         logger.info("finish process_flush_classes"); logger.flush
