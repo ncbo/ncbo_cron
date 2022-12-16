@@ -10,6 +10,8 @@ But the user can add arguments to change some settings.
 
 Here an example to run the flush old graph job every 3 hours and to disable the automatic pull of new submissions:
 
+WARNING: 4store blocks and becomes unresponsive for the duration of the graph deletion operation which could cause a temporary outage on sites with high traffic.
+
 ```
 bin/ncbo_cron --flush-old-graphs "0 */3 * * *" --disable-pull
 ```
