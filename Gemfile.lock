@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 6db93bb3d5095a5fe0d017e572c5a04caa34ebc6
+  revision: db2b330fb6c5fd4ea9ee17d5b58ca997f304a340
   branch: develop
   specs:
     goo (0.0.2)
@@ -15,7 +15,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: d7ee80860a0eab9293af81083a0700d099c50263
+  revision: 9a037b955b1d6c3c9955250d7499afdd10d4bbd3
   branch: develop
   specs:
     ncbo_annotator (0.0.1)
@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: e716a6d410883a8e59121e7d09d2c80a6f6ab1fc
+  revision: 4b6b7f42882b9ad815ff5e90c354212aca085fda
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -111,8 +111,8 @@ GEM
     google-analytics-data (0.4.0)
       google-analytics-data-v1beta (>= 0.7, < 2.a)
       google-cloud-core (~> 1.6)
-    google-analytics-data-v1beta (0.10.0)
-      gapic-common (>= 0.20.0, < 2.a)
+    google-analytics-data-v1beta (0.11.1)
+      gapic-common (>= 0.21.1, < 2.a)
       google-cloud-errors (~> 1.0)
     google-apis-analytics_v3 (0.13.0)
       google-apis-core (>= 0.11.0, < 2.a)
@@ -286,4 +286,4 @@ DEPENDENCIES
   test-unit-minitest
 
 BUNDLED WITH
-   2.3.15
+   2.3.22
