@@ -3,6 +3,12 @@ source 'https://rubygems.org'
 gemspec
 
 gem 'ffi'
+
+# This is needed temporarily to pull the Google Universal Analytics (UA)
+# data and store it in a file. See (bin/generate_ua_analytics_file.rb)
+# The ability to pull this data from Google will cease on July 1, 2024
+gem "google-apis-analytics_v3"
+
 gem 'google-analytics-data'
 gem 'mail', '2.6.6'
 gem 'multi_json'

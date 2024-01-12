@@ -32,7 +32,7 @@ logger = Logger.new($stdout)
 logger.info "Starting ncbo pull"; logger.flush
 puller = NcboCron::Models::OntologyPull.new
 begin
-  puller.do_ontology_pull(ontology_acronym, logger: logger , enable_pull_umls:true )
+  puller.do_ontology_pull(ontology_acronym, logger: logger, enable_pull_umls: true)
 rescue StandardError => e
   logger.error e.message
   logger.flush

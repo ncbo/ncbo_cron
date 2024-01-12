@@ -1,39 +1,22 @@
 require 'multi_json'
+require_relative 'ontology_helper'
 
 module NcboCron
   module Models
 
     class OntologySubmissionParser
 
-      QUEUE_HOLDER = "parseQueue"
-      IDPREFIX = "sub:"
-
-      ACTIONS = {
-        :process_rdf => true,
-        :generate_labels => true,
-        :index_search => true,
-        :index_properties => true,
-        :run_metrics => true,
-        :process_annotator => true,
-        :diff => true
-      }
+      QUEUE_HOLDER = NcboCron::Helpers::OntologyHelper::PROCESS_QUEUE_HOLDER
+      ACTIONS = NcboCron::Helpers::OntologyHelper::PROCESS_ACTIONS
 
       def initialize()
       end
 
-      def queue_submission(submission, actions={:all => true})
-        redis = Redis.new(:host => NcboCron.settings.redis_host, :port => NcboCron.settings.redis_port)
-
-        if actions[:all]
-          actions = ACTIONS.dup
-        else
-          actions.delete_if {|k, v| !ACTIONS.has_key?(k)}
-        end
-        actionStr = MultiJson.dump(actions)
-        redis.hset(QUEUE_HOLDER, get_prefixed_id(submission.id), actionStr) unless actions.empty?
+      def queue_submission(submission, actions={ :all => true })
+        NcboCron::Helpers::OntologyHelper.queue_submission(submission, actions)
       end
 
-      def process_queue_submissions(options = {})
+      def process_queue_submissions(options={})
         logger = options[:logger]
         logger ||= Kernel.const_defined?("LOGGER") ? Kernel.const_get("LOGGER") : Logger.new(STDOUT)
         redis = Redis.new(:host => NcboCron.settings.redis_host, :port => NcboCron.settings.redis_port)
@@ -44,6 +27,20 @@ module NcboCron
           realKey = process_data[:key]
           key = process_data[:redis_key]
           redis.hdel(QUEUE_HOLDER, key)
+
+          # if :remote_pull is one of the actions, pull the ontology and halt if no new submission is found
+          # if a new submission is found, replace the submission ID with the new one and proceed with
+          # processing the remaining actions on the new submission
+          if actions.key?(:remote_pull) && actions[:remote_pull]
+            acronym = NcboCron::Helpers::OntologyHelper.acronym_from_submission_id(realKey)
+            new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym, enable_pull_umls: false,
+                                                                                umls_download_url: '', logger: logger,
+                                                                                add_to_queue: false)
+            return unless new_submission
+            realKey = new_submission.id.to_s
+            actions.delete(:remote_pull)
+          end
+
           begin
             process_submission(logger, realKey, actions)
           rescue Exception => e
@@ -56,7 +53,7 @@ module NcboCron
       def queued_items(redis, logger=nil)
         logger ||= Kernel.const_defined?("LOGGER") ? Kernel.const_get("LOGGER") : Logger.new(STDOUT)
         all = redis.hgetall(QUEUE_HOLDER)
-        prefix_remove = Regexp.new(/^#{IDPREFIX}/)
+        prefix_remove = Regexp.new(/^#{NcboCron::Helpers::OntologyHelper::REDIS_SUBMISSION_ID_PREFIX}/)
         items = []
         all.each do |key, val|
           begin
@@ -74,10 +71,6 @@ module NcboCron
           }
         end
         items
-      end
-
-      def get_prefixed_id(id)
-        "#{IDPREFIX}#{id}"
       end
 
       def zombie_classes_graphs
@@ -189,6 +182,10 @@ module NcboCron
         else
           multi_logger.error "Submission #{submission_id} is not in the system. Processing cancelled..."
         end
+      end
+
+      def get_prefixed_id(id)
+        NcboCron::Helpers::OntologyHelper.get_prefixed_id(id)
       end
 
       private

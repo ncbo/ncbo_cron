@@ -38,7 +38,6 @@ module NcboCron
           @logger.flush
           ont_acronyms = LinkedData::Models::Ontology.where.include(:acronym).all.map {|o| o.acronym}
           # ont_acronyms = ["NCIT", "SNOMEDCT", "MEDDRA"]
-
           @logger.info "Authenticating with the Google Analytics Endpoint..."
           @logger.flush
           google_client = authenticate_google
@@ -137,39 +136,49 @@ module NcboCron
               break if num_results < max_results
             end # loop
           end # ont_acronyms
-          @logger.info "Refresh complete, merging GA4 and UA data..."
+          @logger.info "Refresh complete"
           @logger.flush
-          full_data = merge_ga4_ua_data(aggregated_results)
-          @logger.info "Merged"
-          @logger.flush
+          full_data = merge_and_fill_missing_data(aggregated_results)
         end # Benchmark.realtime
         @logger.info "Completed Google Analytics refresh in #{(time/60).round(1)} minutes."
         @logger.flush
         full_data
       end
 
-      def merge_ga4_ua_data(ga4_data)
-        ua_data_file = File.read(NcboCron.settings.analytics_path_to_ua_data_file)
-        ua_data = JSON.parse(ua_data_file)
-        ua_ga4_intersecting_year = Date.parse(GA4_START_DATE).year.to_s
-        ua_ga4_intersecting_month = Date.parse(GA4_START_DATE).month.to_s
+      def merge_and_fill_missing_data(ga4_data)
+        ua_data = {}
 
-        # add up hits for June of 2023 (the only intersecting month between UA and GA4)
-        ua_data.each do |acronym, _|
-          if ga4_data.has_key?(acronym)
-            if ga4_data[acronym][ua_ga4_intersecting_year].has_key?(ua_ga4_intersecting_month)
-              ua_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month] +=
-                  ga4_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month]
-              # delete data for June of 2023 from ga4_data to avoid overwriting when merging
-              ga4_data[acronym][ua_ga4_intersecting_year].delete(ua_ga4_intersecting_month)
+        if File.exists?(NcboCron.settings.analytics_path_to_ua_data_file) &&
+            !File.zero?(NcboCron.settings.analytics_path_to_ua_data_file)
+          @logger.info "Merging GA4 and UA data..."
+          @logger.flush
+          ua_data_file = File.read(NcboCron.settings.analytics_path_to_ua_data_file)
+          ua_data = JSON.parse(ua_data_file)
+          ua_ga4_intersecting_year = Date.parse(GA4_START_DATE).year.to_s
+          ua_ga4_intersecting_month = Date.parse(GA4_START_DATE).month.to_s
+
+          # add up hits for June of 2023 (the only intersecting month between UA and GA4)
+          ua_data.each do |acronym, _|
+            if ga4_data.has_key?(acronym)
+              if ga4_data[acronym][ua_ga4_intersecting_year].has_key?(ua_ga4_intersecting_month)
+                ua_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month] +=
+                    ga4_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month]
+                # delete data for June of 2023 from ga4_data to avoid overwriting when merging
+                ga4_data[acronym][ua_ga4_intersecting_year].delete(ua_ga4_intersecting_month)
+              end
             end
           end
         end
+
         # merge ua and ga4 data
         merged_data = ua_data.deep_merge(ga4_data)
         # fill missing years and months
+        @logger.info "Filling in missing years data..."
+        @logger.flush
         fill_missing_data(merged_data)
         # sort acronyms, years and months
+        @logger.info "Sorting final data..."
+        @logger.flush
         sort_ga_data(merged_data)
       end
 
@@ -221,4 +230,4 @@ end
 # # ontology_analytics_logger = Logger.new(ontology_analytics_log_path)
 # ontology_analytics_logger = Logger.new(STDOUT)
 # NcboCron::Models::OntologyAnalytics.new(ontology_analytics_logger).run
-# # ./bin/ncbo_cron --disable-processing true --disable-pull true --disable-flush true --disable-warmq true --disable-ontologies-report true --disable-mapping-counts true --disable-spam-deletion true --ontology-analytics '14 * * * *'
+# ./bin/ncbo_cron --disable-processing true --disable-pull true --disable-flush true --disable-warmq true --disable-ontologies-report true --disable-mapping-counts true --disable-spam-deletion true --ontology-analytics '14 * * * *'

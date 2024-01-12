@@ -1,5 +1,6 @@
 require 'logger'
 require 'benchmark'
+require_relative 'ontology_helper'
 
 module NcboCron
   module Models
@@ -66,17 +67,13 @@ module NcboCron
 
         ontologies.each do |ont|
           if ont.group && !ont.group.empty?
-            umls_gr = ont.group.select {|gr| acronym_from_id(gr.id.to_s).include?('UMLS')}
+            umls_gr = ont.group.select {|gr| NcboCron::Helpers::OntologyHelper.last_fragment_of_uri(gr.id.to_s).include?('UMLS')}
             scores[ont.acronym] = umls_gr.empty? ? 0 : 1
           else
             scores[ont.acronym] = 0
           end
         end
         scores
-      end
-
-      def acronym_from_id(id)
-        id.to_s.split("/")[-1]
       end
 
       def normalize(x, xmin, xmax, ymin, ymax)

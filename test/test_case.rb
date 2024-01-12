@@ -56,7 +56,7 @@ class CronUnit < MiniTest::Unit
     return 0
   end
 
-  def backend_4s_delete
+  def backend_triplestore_delete
     raise StandardError, 'Too many triples in KB, does not seem right to run tests' unless
           count_pattern('?s ?p ?o') < 400000
 
@@ -89,7 +89,7 @@ class CronUnit < MiniTest::Unit
   end
 
   def _run_suite(suite, type)
-    backend_4s_delete
+    backend_triplestore_delete
     suite.before_suite if suite.respond_to?(:before_suite)
     super(suite, type)
   rescue Exception => e
@@ -98,7 +98,7 @@ class CronUnit < MiniTest::Unit
     puts 'Traced from:'
     raise e
   ensure
-    backend_4s_delete
+    backend_triplestore_delete
     suite.after_suite if suite.respond_to?(:after_suite)
   end
 end

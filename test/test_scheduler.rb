@@ -39,7 +39,7 @@ class TestScheduler < MiniTest::Unit::TestCase
       sleep(5)
       finished_array = listen_string.split("\n")
 
-      assert finished_array.length >= 4
+      assert_operator 4, :<=, finished_array.length
 
       assert job1_thread.alive?
       job1_thread.kill

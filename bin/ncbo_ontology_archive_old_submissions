@@ -119,13 +119,17 @@ onts.each do |ont|
   end
 end
 
-msg = JSON.pretty_generate(bad_submissions)
 puts
-puts msg
-logger.error(msg)
 
-msg = "Number of errored submissions: #{bad_submissions.length}"
-puts msg
-logger.error(msg)
-
-
+if bad_submissions.empty?
+  msg = "No errored submissions found"
+  puts msg
+  logger.info(msg)
+else
+  msg = JSON.pretty_generate(bad_submissions)
+  puts msg
+  logger.error(msg)
+  msg = "Number of errored submissions: #{bad_submissions.length}"
+  puts msg
+  logger.error(msg)
+end
