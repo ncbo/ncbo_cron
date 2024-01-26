@@ -24,8 +24,9 @@ umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
 umls_files = Dir.glob(File.join(umls_files_path, "*.ttl"))
 
 # UMLS Release Details.  Update this for new release
-new_version = "2018AB"
-new_released = "2018-11-05" #Release date
+new_version = "2023AB"
+# Release date in YYYY-MM-DD format
+new_released = "2023-11-06"
 
 file_index = {}
 umls_files.each do |x|
@@ -64,11 +65,11 @@ file_index.each do |acr,file_path|
   end
 end
 puts "#{new_submissions.length} new files mapped to ontologies"
-pull = NcboCron::Models::OntologyPull.new
+pull = NcboCron::Helpers::OntologyHelper
 new_submissions.each_key do |acr|
   ont, sub, file = new_submissions[acr]
   filename = file.split("/")[-1]
   pull.create_submission(ont,sub,file,filename,logger=nil,
-                         add_to_pull=false,new_version,new_released)
+                         add_to_pull=true,new_version,new_released)
   puts "Created new submission for #{acr}"
 end
