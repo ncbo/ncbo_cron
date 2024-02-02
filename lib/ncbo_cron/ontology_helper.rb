@@ -101,32 +101,17 @@ module NcboCron
         new_sub.submissionStatus = nil
         new_sub.creationDate = nil
         new_sub.missingImports = nil
+        new_sub.masterFileName = nil
         new_sub.metrics = nil
         full_file_path = File.expand_path(file_location)
 
         # check if OWLAPI is able to parse the file before creating a new submission
-        owlapi = LinkedData::Parser::OWLAPICommand.new(
-          full_file_path,
-          File.expand_path(new_sub.data_folder.to_s),
-          logger: logger)
-        owlapi.disable_reasoner
-        parsable = true
-
-        begin
-          owlapi.parse
-        rescue Exception => e
-          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
-          logger.error("A new submission has NOT been created.")
-          logger.flush
-          parsable = false
-        end
-
-        if parsable
+        if new_sub.parsable?(logger: logger)
           if new_sub.valid?
-            new_sub.save()
+            new_sub.save
 
             if add_to_queue
-              self.queue_submission(new_sub, { all: true })
+              queue_submission(new_sub, { all: true })
               logger.info("OntologyPull created a new submission (#{submission_id}) for ontology #{ont.acronym}")
             end
           else
@@ -134,6 +119,9 @@ module NcboCron
             logger.flush
           end
         else
+          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
+          logger.error("A new submission has NOT been created.")
+          logger.flush
           # delete the bad file
           File.delete full_file_path if File.exist? full_file_path
         end
