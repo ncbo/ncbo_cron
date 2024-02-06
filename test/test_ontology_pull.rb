@@ -156,7 +156,7 @@ class TestOntologyPull < TestCase
       pull = NcboCron::Models::OntologyPull.new
       pull.do_remote_ontology_pull
 
-      assert last_email_sent.subject.include? "[BioPortal] Load from URL failure for #{ont.name}"
+      assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
       user = ont.administeredBy[0]
       user.bring(:email)
       assert (last_email_sent.to.first.include? user.email) || (last_email_sent.header['Overridden-Sender'].value.include? user.email)
