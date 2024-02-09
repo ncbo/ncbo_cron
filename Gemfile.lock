@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 602a44cbe83ff13d304650f3c4352497d0071a8a
+  revision: c77d0b390e19c394989e9467e447fcc653b53fa5
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -139,7 +139,7 @@ GEM
       grpc (~> 1.27)
     googleapis-common-protos-types (1.11.0)
       google-protobuf (~> 3.18)
-    googleauth (1.9.2)
+    googleauth (1.10.0)
       faraday (>= 1.0, < 3.a)
       google-cloud-env (~> 2.1)
       jwt (>= 1.4, < 3.0)
@@ -176,7 +176,7 @@ GEM
     method_source (1.0.0)
     mime-types (3.5.2)
       mime-types-data (~> 3.2015)
-    mime-types-data (3.2023.1205)
+    mime-types-data (3.2024.0206)
     mini_mime (1.1.5)
     minitest (4.7.5)
     mlanett-redis-lock (0.2.7)
@@ -202,7 +202,7 @@ GEM
     rake (13.1.0)
     rdf (1.0.8)
       addressable (>= 2.2)
-    redis (5.0.8)
+    redis (5.1.0)
       redis-client (>= 0.17.0)
     redis-client (0.19.1)
       connection_pool
