@@ -10,7 +10,6 @@ gem 'ffi'
 gem "google-apis-analytics_v3"
 
 gem 'google-analytics-data'
-gem 'mail', '2.6.6'
 gem 'multi_json'
 gem 'oj', '~> 3.0'
 gem 'parseconfig'
@@ -36,4 +35,5 @@ group :test do
   gem 'simplecov'
   gem 'simplecov-cobertura' # for codecov.io
   gem 'test-unit-minitest'
+  gem 'webrick'
 end
