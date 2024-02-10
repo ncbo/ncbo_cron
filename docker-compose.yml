@@ -63,9 +63,9 @@ services:
       GOO_BACKEND_NAME: ag
       GOO_PORT: 10035
       GOO_HOST: agraph-ut
-      GOO_PATH_QUERY: /repositories/bioportal_test
-      GOO_PATH_DATA: /repositories/bioportal_test/statements
-      GOO_PATH_UPDATE: /repositories/bioportal_test/statements
+      GOO_PATH_QUERY: /repositories/ontoportal_test
+      GOO_PATH_DATA: /repositories/ontoportal_test/statements
+      GOO_PATH_UPDATE: /repositories/ontoportal_test/statements
     profiles:
       - agraph
     depends_on:
@@ -122,12 +122,12 @@ services:
     #  - 10035:10035
     command: >
        bash -c "/agraph/bin/agraph-control --config /agraph/etc/agraph.cfg start
-       ; agtool repos create bioportal_test
+       ; agtool repos create --supersede ontoportal_test
        ; agtool users add anonymous
-       ; agtool users grant anonymous root:bioportal_test:rw
+       ; agtool users grant anonymous root:ontoportal_test:rw
        ; tail -f /agraph/data/agraph.log"
     healthcheck:
-      test: ["CMD-SHELL", "agtool storage-report bioportal_test || exit 1"]
+      test: ["CMD-SHELL", "agtool storage-report ontoportal_test || exit 1"]
       start_period: 30s #AllegroGraph can take a loooooong time to start
       interval: 20s
       timeout: 10s
