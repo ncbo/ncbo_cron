@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: ec3236a71ff172579923245646d0ea058844794e
+  revision: 0003905c5d101f4df17e35784c0d15d2f5d42110
   branch: master
   specs:
     ontologies_linked_data (0.0.1)
@@ -137,7 +137,7 @@ GEM
       google-protobuf (~> 3.14)
       googleapis-common-protos-types (~> 1.2)
       grpc (~> 1.27)
-    googleapis-common-protos-types (1.11.0)
+    googleapis-common-protos-types (1.12.0)
       google-protobuf (~> 3.18)
     googleauth (1.10.0)
       faraday (>= 1.0, < 3.a)
@@ -204,7 +204,7 @@ GEM
       addressable (>= 2.2)
     redis (5.1.0)
       redis-client (>= 0.17.0)
-    redis-client (0.19.1)
+    redis-client (0.20.0)
       connection_pool
     representable (3.2.0)
       declarative (< 0.1.0)
@@ -225,7 +225,7 @@ GEM
     rubyzip (2.3.2)
     rufus-scheduler (2.0.24)
       tzinfo (>= 0.3.22)
-    signet (0.18.0)
+    signet (0.19.0)
       addressable (~> 2.8)
       faraday (>= 0.17.5, < 3.a)
       jwt (>= 1.5, < 3.0)
