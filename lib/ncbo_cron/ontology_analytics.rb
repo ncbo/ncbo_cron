@@ -158,15 +158,15 @@ module NcboCron
           ua_ga4_intersecting_month = Date.parse(GA4_START_DATE).month.to_s
 
           # add up hits for June of 2023 (the only intersecting month between UA and GA4)
-          ua_data.each do |acronym, _|
-            if ga4_data.has_key?(acronym)
-              if ga4_data[acronym][ua_ga4_intersecting_year].has_key?(ua_ga4_intersecting_month)
-                ua_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month] +=
-                    ga4_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month]
-                # delete data for June of 2023 from ga4_data to avoid overwriting when merging
-                ga4_data[acronym][ua_ga4_intersecting_year].delete(ua_ga4_intersecting_month)
-              end
-            end
+          ua_data.each do |acronym|
+            next unless ga4_data.key?(acronym)
+            next unless ga4_data[acronym].key?(ua_ga4_intersecting_year)
+            next unless ga4_data[acronym][ua_ga4_intersecting_year].key?(ua_ga4_intersecting_month)
+
+            ua_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month] +=
+              ga4_data[acronym][ua_ga4_intersecting_year][ua_ga4_intersecting_month]
+            # delete data for June of 2023 from ga4_data to avoid overwriting when merging
+            ga4_data[acronym][ua_ga4_intersecting_year].delete(ua_ga4_intersecting_month)
           end
         end
 
