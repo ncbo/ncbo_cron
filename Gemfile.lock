@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 68296aa27bfe5991f1eef871cecd8d5bb4960c01
+  revision: 2575a6ecf62f6f1161f103429fc278939630ad87
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -161,7 +161,7 @@ GEM
       concurrent-ruby (~> 1.0)
     json (2.7.1)
     json_pure (2.7.1)
-    jwt (2.8.0)
+    jwt (2.8.1)
       base64
     launchy (2.5.2)
       addressable (~> 2.8)
@@ -184,7 +184,7 @@ GEM
       redis
     multi_json (1.15.0)
     net-http-persistent (2.9.4)
-    net-imap (0.4.10)
+    net-imap (0.3.7)
       date
       net-protocol
     net-pop (0.1.2)
