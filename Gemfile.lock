@@ -15,7 +15,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: b111a1d5b61d112ad6752f17d3ad94c9c3cf69db
+  revision: fe0783c542479ed0a12da5663ef28e1673e80eba
   branch: develop
   specs:
     ncbo_annotator (0.0.1)
@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 2575a6ecf62f6f1161f103429fc278939630ad87
+  revision: b78284bac1a2d9c7b04245e55f3708de5dfe591e
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -93,11 +93,10 @@ GEM
       htmlentities (~> 4.3.3)
       launchy (~> 2.1)
       mail (~> 2.7)
-    faraday (2.8.1)
-      base64
-      faraday-net_http (>= 2.0, < 3.1)
-      ruby2_keywords (>= 0.0.4)
-    faraday-net_http (3.0.2)
+    faraday (2.9.0)
+      faraday-net_http (>= 2.0, < 3.2)
+    faraday-net_http (3.1.0)
+      net-http
     faraday-retry (2.2.0)
       faraday (~> 2.0)
     ffi (1.16.3)
@@ -183,8 +182,10 @@ GEM
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
+    net-http (0.4.1)
+      uri
     net-http-persistent (2.9.4)
-    net-imap (0.3.7)
+    net-imap (0.4.10)
       date
       net-protocol
     net-pop (0.1.2)
@@ -214,7 +215,7 @@ GEM
       addressable (>= 2.2)
     redis (5.1.0)
       redis-client (>= 0.17.0)
-    redis-client (0.20.0)
+    redis-client (0.21.0)
       connection_pool
     representable (3.2.0)
       declarative (< 0.1.0)
@@ -231,7 +232,6 @@ GEM
       builder (>= 2.1.2)
       faraday (>= 0.9, < 3, != 2.0.0)
     ruby-xxHash (0.4.0.2)
-    ruby2_keywords (0.0.5)
     rubyzip (2.3.2)
     rufus-scheduler (2.0.24)
       tzinfo (>= 0.3.22)
@@ -259,6 +259,7 @@ GEM
     tzinfo (2.0.6)
       concurrent-ruby (~> 1.0)
     uber (0.1.0)
+    uri (0.13.0)
     uuid (2.3.9)
       macaddr (~> 1.0)
     webrick (1.8.1)
@@ -294,4 +295,4 @@ DEPENDENCIES
   webrick
 
 BUNDLED WITH
-   2.3.15
+   2.5.6
