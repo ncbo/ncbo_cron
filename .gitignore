@@ -6,6 +6,7 @@ config/*.p12
 config/*.json
 data/
 projectFilesBackup/
+.bundle
 .ruby-version
 repo*
 *.turtle
