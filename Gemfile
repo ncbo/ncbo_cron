@@ -2,6 +2,8 @@ source 'https://rubygems.org'
 
 gemspec
 
+gem 'faraday', '~> 2'
+gem 'faraday-follow_redirects', '~> 0'
 gem 'ffi'
 
 # This is needed temporarily to pull the Google Universal Analytics (UA)
