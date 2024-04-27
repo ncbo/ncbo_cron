@@ -15,6 +15,8 @@ Gem::Specification.new do |gem|
   gem.require_paths = ["lib"]
 
   gem.add_dependency("dante")
+  gem.add_dependency('faraday', '~> 2')
+  gem.add_dependency('faraday-follow_redirects', '~> 0')
   gem.add_dependency("goo")
   gem.add_dependency("google-analytics-data")
   gem.add_dependency("mlanett-redis-lock")
