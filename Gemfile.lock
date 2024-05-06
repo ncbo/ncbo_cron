@@ -16,7 +16,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: f9a1be204e81d72f408927b8f60c0be208611929
+  revision: 7531e10ad55ac66e925c099d7fc05a5a3ceae67e
   branch: develop
   specs:
     ncbo_annotator (0.0.1)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: da1642ed8f9f04db2e427e35d88f235a55138d03
+  revision: a3f6cf0493bb595011f98acf95efda33111c537b
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -151,10 +151,10 @@ GEM
       multi_json (~> 1.11)
       os (>= 0.9, < 2.0)
       signet (>= 0.16, < 2.a)
-    grpc (1.62.0)
+    grpc (1.63.0)
       google-protobuf (~> 3.25)
       googleapis-common-protos-types (~> 1.0)
-    grpc (1.62.0-x86_64-linux)
+    grpc (1.63.0-x86_64-linux)
       google-protobuf (~> 3.25)
       googleapis-common-protos-types (~> 1.0)
     htmlentities (4.3.4)
@@ -225,7 +225,7 @@ GEM
       declarative (< 0.1.0)
       trailblazer-option (>= 0.1.1, < 0.2.0)
       uber (< 0.2.0)
-    request_store (1.6.0)
+    request_store (1.7.0)
       rack (>= 1.4)
     rest-client (2.1.0)
       http-accept (>= 1.7.0, < 2.0)
