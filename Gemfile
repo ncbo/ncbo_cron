@@ -24,10 +24,10 @@ gem 'sys-proctable'
 gem 'cube-ruby', require: 'cube'
 
 # NCBO
-gem 'goo', github: 'ncbo/goo', branch: 'develop'
-gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
-gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'develop'
+gem 'goo', github: 'ncbo/goo', branch: 'master'
+gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'master'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'master'
+gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'master'
 
 group :test do
   gem 'email_spec'
