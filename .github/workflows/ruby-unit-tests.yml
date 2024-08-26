@@ -15,8 +15,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: copy config.rb file from template
       run:  cp config/config.test.rb config/config.rb
-    - name: Build docker-compose
-      run: docker-compose build
+    - name: Build docker compose
+      run: docker compose build
     - name: Run unit tests
       run: |
         ci_env=`bash <(curl -s https://codecov.io/env)`
