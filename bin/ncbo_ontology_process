@@ -13,6 +13,9 @@ abort("Please create a config/config.rb file using the config/config.rb.sample a
 require_relative '../config/config'
 require 'optparse'
 
+# do not send notifications to ontology owners when running this script
+LinkedData.settings.enable_notifications = false
+
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
   # Set a banner, displayed at the top of the help screen.

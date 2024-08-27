@@ -15,12 +15,12 @@ jobs:
     - uses: actions/checkout@v4
     - name: copy config.rb file from template
       run:  cp config/config.test.rb config/config.rb
-    - name: Build docker-compose
-      run: docker-compose build
+    - name: Build docker compose
+      run: docker compose build
     - name: Run unit tests
       run: |
         ci_env=`bash <(curl -s https://codecov.io/env)`
-        docker-compose run $ci_env -e CI --rm ${{ matrix.backend }} bundle exec rake test TESTOPTS='-v'
+        docker compose run $ci_env -e CI --rm ${{ matrix.backend }} bundle exec rake test TESTOPTS='-v'
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
       with:
