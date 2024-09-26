@@ -109,7 +109,6 @@ GEM
     faraday-retry (2.2.1)
       faraday (~> 2.0)
     ffi (1.17.0)
-    ffi (1.17.0-x86_64-linux-gnu)
     gapic-common (0.22.0)
       faraday (>= 1.9, < 3.a)
       faraday-retry (>= 1.0, < 3.a)
@@ -315,4 +314,4 @@ DEPENDENCIES
   webrick
 
 BUNDLED WITH
-   2.5.7
+   2.5.20
