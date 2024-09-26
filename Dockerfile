@@ -14,6 +14,7 @@ COPY Gemfile* *.gemspec /srv/ontoportal/ncbo_cron/
 
 WORKDIR /srv/ontoportal/ncbo_cron
 
+RUN gem update --system
 RUN gem install bundler
 ENV BUNDLE_PATH=/srv/ontoportal/bundle
 RUN bundle install
