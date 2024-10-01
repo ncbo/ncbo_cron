@@ -104,8 +104,8 @@ class TestScheduler < MiniTest::Unit::TestCase
 
       assert job1_thread.alive?
       assert job2_thread.alive?
-      assert listen_string.include?("JOB1")
-      refute listen_string.include?("JOB2")
+      assert_includes listen_string, "JOB1"
+      refute_includes listen_string, "JOB2"
       job1_thread.kill
       job1_thread.join
       refute job1_thread.alive?
