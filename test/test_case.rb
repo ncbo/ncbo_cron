@@ -107,4 +107,11 @@ MiniTest::Unit.runner = CronUnit.new
 ##
 # Base test class. Put shared test methods or setup here.
 class TestCase < MiniTest::Unit::TestCase
+  # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
+  def self.unused_port
+    server = TCPServer.new('127.0.0.1', 0)
+    port = server.addr[1]
+    server.close
+    port
+  end
 end

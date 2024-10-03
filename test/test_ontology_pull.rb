@@ -9,7 +9,7 @@ class TestOntologyPull < TestCase
   def self.before_suite
     ont_path = File.expand_path("../data/ontology_files/BRO_v3.2.owl", __FILE__)
     file = File.new(ont_path)
-    @@port = Random.rand(55000..65535) # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
+    @@port = TestCase.unused_port
     @@url = "http://localhost:#{@@port}/"
     @@thread = Thread.new do
       server = WEBrick::HTTPServer.new(Port: @@port)
@@ -103,7 +103,7 @@ class TestOntologyPull < TestCase
   end
 
   def test_pull_error_notification
-    server_port = Random.rand(55000..65535)
+    server_port = TestCase.unused_port
 
     begin
       thread = Thread.new do

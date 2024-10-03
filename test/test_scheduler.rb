@@ -1,9 +1,7 @@
-require 'minitest/unit'
-MiniTest::Unit.autorun
+require_relative 'test_case'
+# require_relative '../lib/ncbo_cron'
 
-require_relative '../lib/ncbo_cron'
-
-class TestScheduler < MiniTest::Unit::TestCase
+class TestScheduler < TestCase
   def test_scheduler
     begin
       logger = Logger.new($stdout)
@@ -19,7 +17,8 @@ class TestScheduler < MiniTest::Unit::TestCase
       # Create a simple TCPServer to listen from the fork
       require 'socket'
       listen_string = ""
-      port = Random.rand(55000..65535) # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
+      port = TestCase.unused_port
+
       socket_server = Thread.new do
         server = TCPServer.new(port)
         loop {
@@ -69,7 +68,7 @@ class TestScheduler < MiniTest::Unit::TestCase
       # Create a simple TCPServer to listen from the fork
       require 'socket'
       listen_string = ""
-      port = Random.rand(55000..65535) # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
+      port = TestCase.unused_port
       socket_server = Thread.new do
         server = TCPServer.new(port)
         loop {
