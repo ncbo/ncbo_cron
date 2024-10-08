@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 2cec53c2d84179171def81d7dc0a18e462e78fc2
+  revision: f943ac33e87c55c88131c32d826ed5d39c89302c
   branch: master
   specs:
     goo (0.0.2)
@@ -16,7 +16,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: 63c986880aa88c9384043e6611a682434a14aba7
+  revision: d46d667ec1b2343fbcdab587f1a70e763b894133
   branch: master
   specs:
     ncbo_annotator (0.0.1)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: a9da0982eef16ea8272002d14d6b8851dc07fb0a
+  revision: 9ab4be437ed84f5a480e7f0d8799824fcea310ae
   branch: master
   specs:
     ontologies_linked_data (0.0.1)
@@ -109,6 +109,9 @@ GEM
     faraday-retry (2.2.1)
       faraday (~> 2.0)
     ffi (1.17.0)
+    ffi (1.17.0-aarch64-linux-gnu)
+    ffi (1.17.0-arm64-darwin)
+    ffi (1.17.0-x86_64-linux-gnu)
     gapic-common (0.22.0)
       faraday (>= 1.9, < 3.a)
       faraday-retry (>= 1.0, < 3.a)
@@ -136,10 +139,16 @@ GEM
     google-cloud-core (1.7.1)
       google-cloud-env (>= 1.0, < 3.a)
       google-cloud-errors (~> 1.0)
-    google-cloud-env (2.2.0)
+    google-cloud-env (2.2.1)
       faraday (>= 1.0, < 3.a)
     google-cloud-errors (1.4.0)
     google-protobuf (4.28.2)
+      bigdecimal
+      rake (>= 13)
+    google-protobuf (4.28.2-aarch64-linux)
+      bigdecimal
+      rake (>= 13)
+    google-protobuf (4.28.2-arm64-darwin)
       bigdecimal
       rake (>= 13)
     google-protobuf (4.28.2-x86_64-linux)
@@ -151,7 +160,7 @@ GEM
       grpc (~> 1.41)
     googleapis-common-protos-types (1.16.0)
       google-protobuf (>= 3.18, < 5.a)
-    googleauth (1.11.0)
+    googleauth (1.11.1)
       faraday (>= 1.0, < 3.a)
       google-cloud-env (~> 2.1)
       jwt (>= 1.4, < 3.0)
@@ -159,6 +168,12 @@ GEM
       os (>= 0.9, < 2.0)
       signet (>= 0.16, < 2.a)
     grpc (1.66.0)
+      google-protobuf (>= 3.25, < 5.0)
+      googleapis-common-protos-types (~> 1.0)
+    grpc (1.66.0-aarch64-linux)
+      google-protobuf (>= 3.25, < 5.0)
+      googleapis-common-protos-types (~> 1.0)
+    grpc (1.66.0-arm64-darwin)
       google-protobuf (>= 3.25, < 5.0)
       googleapis-common-protos-types (~> 1.0)
     grpc (1.66.0-x86_64-linux)
@@ -173,7 +188,7 @@ GEM
       concurrent-ruby (~> 1.0)
     json (2.7.2)
     json_pure (2.7.2)
-    jwt (2.9.1)
+    jwt (2.9.3)
       base64
     launchy (3.0.1)
       addressable (~> 2.8)
@@ -188,9 +203,10 @@ GEM
       net-pop
       net-smtp
     method_source (1.1.0)
-    mime-types (3.5.2)
+    mime-types (3.6.0)
+      logger
       mime-types-data (~> 3.2015)
-    mime-types-data (3.2024.0903)
+    mime-types-data (3.2024.1001)
     mini_mime (1.1.5)
     minitest (4.7.5)
     mlanett-redis-lock (0.2.7)
@@ -284,6 +300,8 @@ GEM
     webrick (1.8.2)
 
 PLATFORMS
+  aarch64-linux
+  arm64-darwin-22
   ruby
   x86_64-linux
 
