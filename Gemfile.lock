@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: d4da86d07a449e91dbbd6b72763f42d3ba3f20f3
+  revision: 35721855ba808517698d8b94eb38d4553001c4b6
   branch: develop
   specs:
     goo (0.0.2)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 02ffe85324271f7cdf3601d57315ebb54d716309
+  revision: db05a3b22c4187fb73dd83312a038fb7f7741271
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -90,7 +90,7 @@ GEM
     connection_pool (2.4.1)
     cube-ruby (0.0.3)
     dante (0.2.0)
-    date (3.3.4)
+    date (3.4.0)
     declarative (0.0.20)
     docile (1.4.1)
     domain_name (0.6.20240107)
@@ -109,7 +109,7 @@ GEM
     faraday-retry (2.2.1)
       faraday (~> 2.0)
     ffi (1.17.0)
-    gapic-common (0.22.0)
+    gapic-common (0.23.0)
       faraday (>= 1.9, < 3.a)
       faraday-retry (>= 1.0, < 3.a)
       google-protobuf (>= 3.25, < 5.a)
@@ -139,10 +139,10 @@ GEM
     google-cloud-env (2.2.1)
       faraday (>= 1.0, < 3.a)
     google-cloud-errors (1.4.0)
-    google-protobuf (4.28.2)
+    google-protobuf (4.28.3)
       bigdecimal
       rake (>= 13)
-    google-protobuf (4.28.2-x86_64-linux)
+    google-protobuf (4.28.3-x86_64-linux)
       bigdecimal
       rake (>= 13)
     googleapis-common-protos (1.6.0)
@@ -151,7 +151,7 @@ GEM
       grpc (~> 1.41)
     googleapis-common-protos-types (1.16.0)
       google-protobuf (>= 3.18, < 5.a)
-    googleauth (1.11.1)
+    googleauth (1.11.2)
       faraday (>= 1.0, < 3.a)
       google-cloud-env (~> 2.1)
       jwt (>= 1.4, < 3.0)
@@ -171,8 +171,8 @@ GEM
     httpclient (2.8.3)
     i18n (0.9.5)
       concurrent-ruby (~> 1.0)
-    json (2.7.2)
-    json_pure (2.7.2)
+    json (2.8.1)
+    json_pure (2.8.1)
     jwt (2.9.3)
       base64
     launchy (3.0.1)
@@ -191,17 +191,17 @@ GEM
     mime-types (3.6.0)
       logger
       mime-types-data (~> 3.2015)
-    mime-types-data (3.2024.1001)
+    mime-types-data (3.2024.1105)
     mini_mime (1.1.5)
     minitest (4.7.5)
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
     mutex_m (0.2.0)
-    net-http (0.4.1)
+    net-http (0.5.0)
       uri
     net-http-persistent (2.9.4)
-    net-imap (0.4.17)
+    net-imap (0.4.18)
       date
       net-protocol
     net-pop (0.1.2)
@@ -211,13 +211,13 @@ GEM
     net-smtp (0.5.0)
       net-protocol
     netrc (0.11.0)
-    oj (3.16.6)
+    oj (3.16.7)
       bigdecimal (>= 3.0)
       ostruct (>= 0.2)
     omni_logger (0.1.4)
       logger
     os (1.1.4)
-    ostruct (0.6.0)
+    ostruct (0.6.1)
     parseconfig (1.1.2)
     pony (1.13.1)
       mail (>= 2.0)
@@ -247,7 +247,7 @@ GEM
       mime-types (>= 1.16, < 4.0)
       netrc (~> 0.8)
     retriable (3.1.2)
-    rexml (3.3.8)
+    rexml (3.3.9)
     rsolr (2.6.0)
       builder (>= 2.1.2)
       faraday (>= 0.9, < 3, != 2.0.0)
@@ -274,15 +274,15 @@ GEM
     systemu (2.6.5)
     test-unit-minitest (0.9.1)
       minitest (~> 4.7)
-    timeout (0.4.1)
+    timeout (0.4.2)
     trailblazer-option (0.1.2)
     tzinfo (2.0.6)
       concurrent-ruby (~> 1.0)
     uber (0.1.0)
-    uri (0.13.1)
+    uri (1.0.2)
     uuid (2.3.9)
       macaddr (~> 1.0)
-    webrick (1.8.2)
+    webrick (1.9.0)
 
 PLATFORMS
   ruby
