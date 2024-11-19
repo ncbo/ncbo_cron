@@ -16,7 +16,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: d46d667ec1b2343fbcdab587f1a70e763b894133
+  revision: b6d50ebb79f114bf81a1cd89d0f8b4d4cbcddda2
   branch: master
   specs:
     ncbo_annotator (0.0.1)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 541cf73e054a3076d29a47df584eba9ac1429611
+  revision: 0ce77f2781ac3353716407c22d8fc16d9bfd2c8f
   branch: master
   specs:
     ontologies_linked_data (0.0.1)
@@ -233,7 +233,7 @@ GEM
     parseconfig (1.1.2)
     pony (1.13.1)
       mail (>= 2.0)
-    pry (0.14.2)
+    pry (0.15.0)
       coderay (~> 1.1)
       method_source (~> 1.0)
     public_suffix (6.0.1)
