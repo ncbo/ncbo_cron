@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 0ce77f2781ac3353716407c22d8fc16d9bfd2c8f
+  revision: 536cbe5cef9e23abc299ed44942c0b3966f9c18d
   branch: master
   specs:
     ontologies_linked_data (0.0.1)
@@ -209,7 +209,7 @@ GEM
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
-    mutex_m (0.2.0)
+    mutex_m (0.3.0)
     net-http (0.5.0)
       uri
     net-http-persistent (2.9.4)
