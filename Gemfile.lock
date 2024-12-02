@@ -16,7 +16,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: b6d50ebb79f114bf81a1cd89d0f8b4d4cbcddda2
+  revision: 95da15aad0168200703c0306c6bd714dc06f4d3d
   branch: master
   specs:
     ncbo_annotator (0.0.1)
@@ -90,7 +90,7 @@ GEM
     connection_pool (2.4.1)
     cube-ruby (0.0.3)
     dante (0.2.0)
-    date (3.4.0)
+    date (3.4.1)
     declarative (0.0.20)
     docile (1.4.1)
     domain_name (0.6.20240107)
@@ -139,16 +139,16 @@ GEM
     google-cloud-env (2.2.1)
       faraday (>= 1.0, < 3.a)
     google-cloud-errors (1.4.0)
-    google-protobuf (4.28.3)
+    google-protobuf (4.29.0)
       bigdecimal
       rake (>= 13)
-    google-protobuf (4.28.3-aarch64-linux)
+    google-protobuf (4.29.0-aarch64-linux)
       bigdecimal
       rake (>= 13)
-    google-protobuf (4.28.3-arm64-darwin)
+    google-protobuf (4.29.0-arm64-darwin)
       bigdecimal
       rake (>= 13)
-    google-protobuf (4.28.3-x86_64-linux)
+    google-protobuf (4.29.0-x86_64-linux)
       bigdecimal
       rake (>= 13)
     googleapis-common-protos (1.6.0)
@@ -191,7 +191,7 @@ GEM
       addressable (~> 2.8)
       childprocess (~> 5.0)
     libxml-ruby (5.0.3)
-    logger (1.6.1)
+    logger (1.6.2)
     macaddr (1.7.2)
       systemu (~> 2.6.5)
     mail (2.8.1)
@@ -210,7 +210,7 @@ GEM
       redis
     multi_json (1.15.0)
     mutex_m (0.3.0)
-    net-http (0.5.0)
+    net-http (0.6.0)
       uri
     net-http-persistent (2.9.4)
     net-imap (0.4.18)
@@ -294,7 +294,7 @@ GEM
     uri (1.0.2)
     uuid (2.3.9)
       macaddr (~> 1.0)
-    webrick (1.9.0)
+    webrick (1.9.1)
 
 PLATFORMS
   aarch64-linux
