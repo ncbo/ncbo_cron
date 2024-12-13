@@ -16,7 +16,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: 2abcd54c148d0983570d681506002d9d3782d2eb
+  revision: 11838eb3d3c66bfcbc0fcbd2081e776da121fb8c
   branch: develop
   specs:
     ncbo_annotator (0.0.1)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 6389fa2052e06ff8e21c64fd1be0030beca4c828
+  revision: 7a46e091e900765906d40eadd5a36b552f459fd7
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -90,7 +90,7 @@ GEM
     connection_pool (2.4.1)
     cube-ruby (0.0.3)
     dante (0.2.0)
-    date (3.4.0)
+    date (3.4.1)
     declarative (0.0.20)
     docile (1.4.1)
     domain_name (0.6.20240107)
@@ -98,7 +98,7 @@ GEM
       htmlentities (~> 4.3.3)
       launchy (>= 2.1, < 4.0)
       mail (~> 2.7)
-    faraday (2.12.1)
+    faraday (2.12.2)
       faraday-net_http (>= 2.0, < 3.5)
       json
       logger
@@ -109,19 +109,21 @@ GEM
     faraday-retry (2.2.1)
       faraday (~> 2.0)
     ffi (1.17.0)
-    gapic-common (0.23.0)
+    gapic-common (0.24.0)
       faraday (>= 1.9, < 3.a)
       faraday-retry (>= 1.0, < 3.a)
+      google-cloud-env (~> 2.2)
+      google-logging-utils (~> 0.1)
       google-protobuf (>= 3.25, < 5.a)
       googleapis-common-protos (~> 1.6)
       googleapis-common-protos-types (~> 1.15)
-      googleauth (~> 1.11)
-      grpc (~> 1.65)
+      googleauth (~> 1.12)
+      grpc (~> 1.66)
     google-analytics-data (0.6.1)
       google-analytics-data-v1beta (>= 0.11, < 2.a)
       google-cloud-core (~> 1.6)
-    google-analytics-data-v1beta (0.13.1)
-      gapic-common (>= 0.21.1, < 2.a)
+    google-analytics-data-v1beta (0.15.0)
+      gapic-common (>= 0.24.0, < 2.a)
       google-cloud-errors (~> 1.0)
     google-apis-analytics_v3 (0.16.0)
       google-apis-core (>= 0.15.0, < 2.a)
@@ -139,10 +141,11 @@ GEM
     google-cloud-env (2.2.1)
       faraday (>= 1.0, < 3.a)
     google-cloud-errors (1.4.0)
-    google-protobuf (4.28.3)
+    google-logging-utils (0.1.0)
+    google-protobuf (4.29.1)
       bigdecimal
       rake (>= 13)
-    google-protobuf (4.28.3-x86_64-linux)
+    google-protobuf (4.29.1-x86_64-linux)
       bigdecimal
       rake (>= 13)
     googleapis-common-protos (1.6.0)
@@ -151,27 +154,28 @@ GEM
       grpc (~> 1.41)
     googleapis-common-protos-types (1.16.0)
       google-protobuf (>= 3.18, < 5.a)
-    googleauth (1.11.2)
+    googleauth (1.12.0)
       faraday (>= 1.0, < 3.a)
-      google-cloud-env (~> 2.1)
+      google-cloud-env (~> 2.2)
+      google-logging-utils (~> 0.1)
       jwt (>= 1.4, < 3.0)
       multi_json (~> 1.11)
       os (>= 0.9, < 2.0)
       signet (>= 0.16, < 2.a)
-    grpc (1.67.0)
+    grpc (1.68.1)
       google-protobuf (>= 3.25, < 5.0)
       googleapis-common-protos-types (~> 1.0)
-    grpc (1.67.0-x86_64-linux)
+    grpc (1.68.1-x86_64-linux)
       google-protobuf (>= 3.25, < 5.0)
       googleapis-common-protos-types (~> 1.0)
     htmlentities (4.3.4)
     http-accept (1.7.0)
-    http-cookie (1.0.7)
+    http-cookie (1.0.8)
       domain_name (~> 0.5)
     httpclient (2.8.3)
     i18n (0.9.5)
       concurrent-ruby (~> 1.0)
-    json (2.8.2)
+    json (2.9.0)
     json_pure (2.8.1)
     jwt (2.9.3)
       base64
@@ -179,7 +183,7 @@ GEM
       addressable (~> 2.8)
       childprocess (~> 5.0)
     libxml-ruby (5.0.3)
-    logger (1.6.1)
+    logger (1.6.3)
     macaddr (1.7.2)
       systemu (~> 2.6.5)
     mail (2.8.1)
@@ -191,14 +195,14 @@ GEM
     mime-types (3.6.0)
       logger
       mime-types-data (~> 3.2015)
-    mime-types-data (3.2024.1105)
+    mime-types-data (3.2024.1203)
     mini_mime (1.1.5)
     minitest (4.7.5)
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
     mutex_m (0.3.0)
-    net-http (0.5.0)
+    net-http (0.6.0)
       uri
     net-http-persistent (2.9.4)
     net-imap (0.4.18)
@@ -233,7 +237,7 @@ GEM
       addressable (>= 2.2)
     redis (5.3.0)
       redis-client (>= 0.22.0)
-    redis-client (0.22.2)
+    redis-client (0.23.0)
       connection_pool
     representable (3.2.0)
       declarative (< 0.1.0)
@@ -282,7 +286,7 @@ GEM
     uri (1.0.2)
     uuid (2.3.9)
       macaddr (~> 1.0)
-    webrick (1.9.0)
+    webrick (1.9.1)
 
 PLATFORMS
   ruby
