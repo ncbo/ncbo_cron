@@ -109,6 +109,7 @@ GEM
     faraday-retry (2.2.1)
       faraday (~> 2.0)
     ffi (1.17.1)
+    ffi (1.17.1-x86_64-linux-gnu)
     gapic-common (0.25.0)
       faraday (>= 1.9, < 3.a)
       faraday-retry (>= 1.0, < 3.a)
@@ -204,10 +205,13 @@ GEM
       redis
     multi_json (1.15.0)
     mutex_m (0.3.0)
+    net-ftp (0.3.8)
+      net-protocol
+      time
     net-http (0.6.0)
       uri
     net-http-persistent (2.9.4)
-    net-imap (0.4.19)
+    net-imap (0.5.6)
       date
       net-protocol
     net-pop (0.1.2)
@@ -280,6 +284,8 @@ GEM
     systemu (2.6.5)
     test-unit-minitest (0.9.1)
       minitest (~> 4.7)
+    time (0.4.1)
+      date
     timeout (0.4.3)
     trailblazer-option (0.1.2)
     tzinfo (2.0.6)
@@ -305,6 +311,7 @@ DEPENDENCIES
   multi_json
   ncbo_annotator!
   ncbo_cron!
+  net-ftp
   oj (~> 3.0)
   ontologies_linked_data!
   parseconfig

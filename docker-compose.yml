@@ -2,9 +2,9 @@ x-app: &app
   build:
     context: .
     args:
-      RUBY_VERSION: '3.0'
+      RUBY_VERSION: '3.1'
   # Increase the version number in the image tag every time Dockerfile or its arguments is changed
-  image: ncbo_cron:0.0.3
+  image: ncbo_cron:0.0.4
   environment: &env
     BUNDLE_PATH: /srv/ontoportal/bundle
     # default bundle config resolves to /usr/local/bundle/config inside of the container
