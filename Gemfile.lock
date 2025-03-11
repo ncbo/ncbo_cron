@@ -328,7 +328,6 @@ DEPENDENCIES
   multi_json
   ncbo_annotator!
   ncbo_cron!
-  net-ftp
   oj (~> 3.0)
   ontologies_linked_data!
   parseconfig

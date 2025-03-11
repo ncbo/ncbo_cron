@@ -11,7 +11,6 @@ gem "google-apis-analytics_v3"
 
 gem 'google-analytics-data'
 gem 'multi_json'
-gem 'net-ftp'
 gem 'oj', '~> 3.0'
 gem 'parseconfig'
 gem 'pony'
