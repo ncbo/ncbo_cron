@@ -99,9 +99,9 @@ module NcboCron
     # seconds between process queue checks
     @settings.seconds_between ||= nil
 
-    ############## VM specific settings ########################
+    ############## OntoPortal Appliance specific settings ########################
     # A config file that identifies the current version of Ontoportal
-    @settings.versions_file_path = "/srv/ontoportal/virtual_appliance/deployment/versions"
+    @settings.versions_file_path = "/opt/ontoportal/virtual_appliance/deployment/versions"
     # An endpoint that checks for Ontoportal update availability
     @settings.update_check_endpoint_url = "https://updatecheck.ontoportal.org/latestversion"
 
