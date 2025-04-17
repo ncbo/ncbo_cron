@@ -8,7 +8,6 @@ module NcboCron
   @settings_run = false
   def config(&block)
     return if @settings_run
-    @settings_run = true
 
     # Redis is used for two separate things in ncbo_cron:
     # 1) locating the queue for the submissions to be processed and
@@ -82,17 +81,8 @@ module NcboCron
     @settings.cron_dictionary_generation_cron_job ||= "30 3 * * *"
 
     @settings.log_level ||= :info
-    unless (@settings.log_path && File.exists?(@settings.log_path))
-      log_dir = File.expand_path("../../../logs", __FILE__)
-      FileUtils.mkdir_p(log_dir)
-      @settings.log_path = "#{log_dir}/scheduler.log"
-    end
-    if File.exists?("/var/run/ncbo_cron")
-      pid_path = File.expand_path("/var/run/ncbo_cron/ncbo_cron.pid", __FILE__)
-    else
-      pid_path = File.expand_path("../../../ncbo_cron.pid", __FILE__)
-    end
-    @settings.pid_path ||= pid_path
+    @settings.log_dir  ||= nil          # let caller provide it
+    @settings.log_path ||= nil          # will build it later
 
     # minutes between process queue checks (override seconds)
     @settings.minutes_between ||= 5
@@ -107,5 +97,12 @@ module NcboCron
 
     # Override defaults
     yield @settings if block_given?
+
+    # ── choose defaults *after* user input ───────────────────────────────
+    @settings.log_dir  ||= File.expand_path("logs", Dir.pwd)
+    @settings.log_path ||= File.join(@settings.log_dir, "scheduler.log")
+    @settings.pid_path ||= File.expand_path("ncbo_cron.pid", Dir.pwd)
+
+    @settings_run = true
   end
 end
