@@ -99,7 +99,7 @@ module NcboCron
     yield @settings if block_given?
 
     # ── choose defaults *after* user input ───────────────────────────────
-    @settings.log_dir  ||= File.expand_path("logs", Dir.pwd)
+    @settings.log_dir  ||= File.expand_path("log", Dir.pwd)
     @settings.log_path ||= File.join(@settings.log_dir, "scheduler.log")
     @settings.pid_path ||= File.expand_path("ncbo_cron.pid", Dir.pwd)
 
