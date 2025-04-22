@@ -80,6 +80,7 @@ GEM
       multi_json (~> 1.0)
     addressable (2.8.7)
       public_suffix (>= 2.0.2, < 7.0)
+    ast (2.4.3)
     base64 (0.2.0)
     bcrypt (3.1.20)
     bigdecimal (3.1.9)
@@ -197,11 +198,13 @@ GEM
     json_pure (2.8.1)
     jwt (2.10.1)
       base64
+    language_server-protocol (3.17.0.4)
     launchy (3.1.1)
       addressable (~> 2.8)
       childprocess (~> 5.0)
       logger (~> 1.6)
     libxml-ruby (5.0.3)
+    lint_roller (1.1.0)
     logger (1.7.0)
     macaddr (1.7.2)
       systemu (~> 2.6.5)
@@ -244,16 +247,22 @@ GEM
       logger
     os (1.1.4)
     ostruct (0.6.1)
+    parallel (1.26.3)
     parseconfig (1.1.2)
+    parser (3.3.7.2)
+      ast (~> 2.4.1)
+      racc
     pony (1.13.1)
       mail (>= 2.0)
     pry (0.15.2)
       coderay (~> 1.1)
       method_source (~> 1.0)
     public_suffix (6.0.1)
+    racc (1.8.1)
     rack (3.1.13)
     rack-test (2.2.0)
       rack (>= 1.3)
+    rainbow (3.1.1)
     rake (13.2.1)
     rdf (1.0.8)
       addressable (>= 2.2)
@@ -261,6 +270,7 @@ GEM
       redis-client (>= 0.22.0)
     redis-client (0.24.0)
       connection_pool
+    regexp_parser (2.10.0)
     representable (3.2.0)
       declarative (< 0.1.0)
       trailblazer-option (>= 0.1.1, < 0.2.0)
@@ -277,6 +287,20 @@ GEM
     rsolr (2.6.0)
       builder (>= 2.1.2)
       faraday (>= 0.9, < 3, != 2.0.0)
+    rubocop (1.74.0)
+      json (~> 2.3)
+      language_server-protocol (~> 3.17.0.2)
+      lint_roller (~> 1.1.0)
+      parallel (~> 1.10)
+      parser (>= 3.3.0.2)
+      rainbow (>= 2.2.2, < 4.0)
+      regexp_parser (>= 2.9.3, < 3.0)
+      rubocop-ast (>= 1.38.0, < 2.0)
+      ruby-progressbar (~> 1.7)
+      unicode-display_width (>= 2.4.0, < 4.0)
+    rubocop-ast (1.41.0)
+      parser (>= 3.3.7.2)
+    ruby-progressbar (1.13.0)
     ruby-xxHash (0.4.0.2)
     rubyzip (2.4.1)
     rufus-scheduler (2.0.24)
@@ -307,6 +331,9 @@ GEM
     tzinfo (2.0.6)
       concurrent-ruby (~> 1.0)
     uber (0.1.0)
+    unicode-display_width (3.1.4)
+      unicode-emoji (~> 4.0, >= 4.0.4)
+    unicode-emoji (4.0.4)
     uri (1.0.3)
     uuid (2.3.9)
       macaddr (~> 1.0)
@@ -337,6 +364,7 @@ DEPENDENCIES
   rake
   redis
   rest-client
+  rubocop
   simplecov
   simplecov-cobertura
   sparql-client!

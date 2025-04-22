@@ -29,6 +29,10 @@ gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
 gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
 gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'develop'
 
+group :development do
+  gem 'rubocop', require: false
+end
+
 group :test do
   gem 'email_spec'
   gem 'minitest', '< 5.0'
