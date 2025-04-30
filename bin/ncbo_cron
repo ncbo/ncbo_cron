@@ -66,10 +66,10 @@ opt_parser = OptionParser.new do |opts|
   opts.on("-h", "--redis-host HOST", String, "redis host (for shared locking)", "(default: #{options[:redis_host]})") do |host|
     options[:redis_host] = host
   end
-  opts.on("-p", "--redis-port PORT", Integer, "redis port (for shared locking)", "(default: #{options[:redis_port]})") do |port|
+  opts.on("--redis-port PORT", Integer, "redis port (for shared locking)", "(default: #{options[:redis_port]})") do |port|
     options[:redis_port] = port
   end
-  opts.on("-l", "--log-level LEVEL", String, "set the log level (debug, info, error)", "(default: #{options[:log_level]})") do |c|
+  opts.on("--log-level LEVEL", String, "set the log level (debug, info, error)", "(default: #{options[:log_level]})") do |c|
     options[:log_level] = c.to_sym
   end
   opts.on("-m", "--minutes MIN", Integer, "minutes between process queue checks (override seconds)", "(default: #{options[:minutes_between]})") do |m|
@@ -129,7 +129,7 @@ opt_parser = OptionParser.new do |opts|
   opts.on("-w", "--warm-long-queries SCHED", String, "cron schedule to warmup long time running queries", "(default: #{options[:cron_warmq]})") do |c|
     options[:cron_warmq] = c
   end  
-  opts.on("-m", "--create-mapping-counts SCHED", String, "cron schedule to create mapping counts", "(default: #{options[:cron_mapping_counts]})") do |c|
+  opts.on("--create-mapping-counts SCHED", String, "cron schedule to create mapping counts", "(default: #{options[:cron_mapping_counts]})") do |c|
     options[:cron_mapping_counts] = c
   end
   opts.on("--ontology-analytics SCHED", String, "cron schedule to run ontology analytics refresh", "(default: #{options[:cron_ontology_analytics]})") do |c|
@@ -180,6 +180,13 @@ end
 # Update the NcboCron.settings with CLI options
 options.each_pair {|k,v| NcboCron.settings[k] = v}
 
+# create log dir
+log_dir = File.dirname(options[:log_path])
+begin
+  FileUtils.mkdir_p(log_dir) unless File.directory?(log_dir)
+rescue SystemCallError => e
+  abort "Cannot create log directory #{log_dir}: #{e.message}"
+end
 
 # Configure the process controller
 require 'dante'
