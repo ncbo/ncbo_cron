@@ -220,6 +220,8 @@ GEM
     mime-types-data (3.2025.0422)
     mini_mime (1.1.5)
     minitest (5.25.5)
+    minitest-hooks (1.5.2)
+      minitest (> 5.3)
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
@@ -353,6 +355,7 @@ DEPENDENCIES
   google-analytics-data
   google-apis-analytics_v3
   minitest (~> 5.2)
+  minitest-hooks (~> 1.5)
   multi_json
   ncbo_annotator!
   ncbo_cron!
