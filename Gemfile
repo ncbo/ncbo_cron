@@ -35,9 +35,8 @@ end
 
 group :test do
   gem 'email_spec'
-  gem 'minitest', '< 5.0'
+  gem 'minitest', '~> 5.2'
   gem 'simplecov'
   gem 'simplecov-cobertura' # for codecov.io
-  gem 'test-unit-minitest'
   gem 'webrick'
 end
