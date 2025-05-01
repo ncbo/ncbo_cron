@@ -6,7 +6,8 @@ require 'email_spec'
 class TestOntologyPull < TestCase
   include EmailSpec::Helpers
 
-  def self.before_suite
+  def before_all
+    super
     ont_path = File.expand_path("../data/ontology_files/BRO_v3.2.owl", __FILE__)
     file = File.new(ont_path)
     @@port = TestCase.unused_port
@@ -36,9 +37,10 @@ class TestOntologyPull < TestCase
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
   end
 
-  def self.after_suite
+  def after_all
     Thread.kill(@@thread)
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
+    super
   end
 
   def test_remote_ontology_pull
