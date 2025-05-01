@@ -4,10 +4,9 @@ if ENV['COVERAGE'] == 'true' || ENV['CI'] == 'true'
   require 'simplecov-cobertura'
   # https://github.com/codecov/ruby-standard-2
   # Generate HTML and Cobertura reports which can be consumed by codecov uploader
-  SimpleCov.formatters = SimpleCov::Formatter::MultiFormatter.new([
-    SimpleCov::Formatter::HTMLFormatter,
-    SimpleCov::Formatter::CoberturaFormatter
-  ])
+  SimpleCov.formatters = SimpleCov::Formatter::MultiFormatter.new(
+    [SimpleCov::Formatter::HTMLFormatter, SimpleCov::Formatter::CoberturaFormatter]
+  )
   SimpleCov.start do
     add_filter '/test/'
     add_filter 'app.rb'
@@ -72,7 +71,7 @@ class TestCase < Minitest::Test
     rs.each_solution do |sol|
       return sol[:c].object
     end
-    return 0
+    0
   end
 
   def backend_triplestore_delete

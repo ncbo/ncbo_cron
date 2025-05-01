@@ -7,7 +7,7 @@ class TestScheduler < TestCase
       logger = Logger.new($stdout)
       logger.level = Logger::ERROR
       options = {
-        job_name: "test_scheduled_job",
+        job_name: 'test_scheduled_job',
         seconds_between: 1,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port,
@@ -16,15 +16,15 @@ class TestScheduler < TestCase
 
       # Create a simple TCPServer to listen from the fork
       require 'socket'
-      listen_string = ""
+      listen_string = ''
       port = TestCase.unused_port
 
       socket_server = Thread.new do
         server = TCPServer.new(port)
-        loop {
+        loop do
           session = server.accept
           listen_string << session.gets
-        }
+        end
       end
 
       # Spawn a thread with a job that takes a while to finish
@@ -59,7 +59,7 @@ class TestScheduler < TestCase
   def test_scheduler_locking
     begin
       options = {
-        job_name: "test_scheduled_job_locking",
+        job_name: 'test_scheduled_job_locking',
         seconds_between: 5,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port
@@ -67,14 +67,14 @@ class TestScheduler < TestCase
 
       # Create a simple TCPServer to listen from the fork
       require 'socket'
-      listen_string = ""
+      listen_string = ''
       port = TestCase.unused_port
       socket_server = Thread.new do
         server = TCPServer.new(port)
-        loop {
+        loop do
           session = server.accept
           listen_string << session.gets
-        }
+        end
       end
 
       # Spawn a thread with a job that takes a while to finish
@@ -103,8 +103,8 @@ class TestScheduler < TestCase
 
       assert job1_thread.alive?
       assert job2_thread.alive?
-      assert_includes listen_string, "JOB1"
-      refute_includes listen_string, "JOB2"
+      assert_includes listen_string, 'JOB1'
+      refute_includes listen_string, 'JOB2'
       job1_thread.kill
       job1_thread.join
       refute job1_thread.alive?
@@ -125,5 +125,5 @@ class TestScheduler < TestCase
         socket_server.join
       end
     end
-   end
+  end
 end
