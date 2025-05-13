@@ -51,7 +51,6 @@ class TestCase < Minitest::Test
   end
 
   def after_all
-    backend_triplestore_delete
     super
   end
 
