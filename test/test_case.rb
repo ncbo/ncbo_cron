@@ -21,6 +21,11 @@ require 'ontologies_linked_data'
 require_relative '../lib/ncbo_cron'
 require_relative '../config/config'
 
+unless ENV['RM_INFO']
+  require 'minitest/reporters'
+  Minitest::Reporters.use! [Minitest::Reporters::SpecReporter.new]
+end
+
 Goo.use_cache = false # Make sure tests don't cache
 
 # Check to make sure you want to run if not pointed at localhost

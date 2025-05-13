@@ -80,6 +80,7 @@ GEM
       multi_json (~> 1.0)
     addressable (2.8.7)
       public_suffix (>= 2.0.2, < 7.0)
+    ansi (1.5.0)
     ast (2.4.3)
     base64 (0.2.0)
     bcrypt (3.1.20)
@@ -222,6 +223,11 @@ GEM
     minitest (5.25.5)
     minitest-hooks (1.5.2)
       minitest (> 5.3)
+    minitest-reporters (1.7.1)
+      ansi
+      builder
+      minitest (>= 5.0)
+      ruby-progressbar
     mlanett-redis-lock (0.2.7)
       redis
     multi_json (1.15.0)
@@ -356,6 +362,7 @@ DEPENDENCIES
   google-apis-analytics_v3
   minitest (~> 5.2)
   minitest-hooks (~> 1.5)
+  minitest-reporters (~> 1.7)
   multi_json
   ncbo_annotator!
   ncbo_cron!
