@@ -6,14 +6,15 @@ require 'email_spec'
 class TestOntologyPull < TestCase
   include EmailSpec::Helpers
 
-  def self.before_suite
-    ont_path = File.expand_path("../data/ontology_files/BRO_v3.2.owl", __FILE__)
+  def before_all
+    super
+    ont_path = File.expand_path('../data/ontology_files/BRO_v3.2.owl', __FILE__)
     file = File.new(ont_path)
     @@port = TestCase.unused_port
     @@url = "http://localhost:#{@@port}/"
     @@thread = Thread.new do
       server = WEBrick::HTTPServer.new(Port: @@port)
-      server.mount_proc '/' do |req, res|
+      server.mount_proc '/' do |_req, res|
         contents = file.read
         file.rewind
         res.body = contents
@@ -25,20 +26,21 @@ class TestOntologyPull < TestCase
       end
     end
 
-    @@redis = Redis.new(:host => NcboCron.settings.redis_host, :port => NcboCron.settings.redis_port)
+    @@redis = Redis.new(host: NcboCron.settings.redis_host, port: NcboCron.settings.redis_port)
     db_size = @@redis.dbsize
 
     if db_size > 10_000
-      puts "This test cannot be run. You are probably pointing to the wrong redis backend. "
+      puts 'This test cannot be run. You are probably pointing to the wrong redis backend.'
       return
     end
 
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
   end
 
-  def self.after_suite
+  def after_all
     Thread.kill(@@thread)
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
+    super
   end
 
   def test_remote_ontology_pull
@@ -56,7 +58,7 @@ class TestOntologyPull < TestCase
     assert_equal 2, ont.submissions.length
 
     new_sub = ont.latest_submission(status: :uploaded)
-    new_sub.bring_remaining()
+    new_sub.bring_remaining
     assert_equal 2, new_sub.submissionId
     assert_equal ontologies[0].submissions[0].pullLocation, new_sub.pullLocation
     assert ontologies[0].submissions[0].released < new_sub.released
@@ -108,7 +110,7 @@ class TestOntologyPull < TestCase
     begin
       thread = Thread.new do
         server = WEBrick::HTTPServer.new(Port: server_port)
-        server.mount_proc '/' do |req, res|
+        server.mount_proc '/' do |_req, res|
           res.body = 'Hello, world!'
         end
         begin
@@ -119,7 +121,9 @@ class TestOntologyPull < TestCase
       end
       assert_equal true, thread.alive?
 
-      ont_count, acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(ont_count: 1, submission_count: 1, process_submission: false)
+      _ont_count, _acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
+        ont_count: 1, submission_count: 1, process_submission: false
+      )
       ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:submissions).first
       ont.bring_remaining
       assert ont.valid?, "Invalid ontology: #{ont.errors}"
@@ -128,7 +132,7 @@ class TestOntologyPull < TestCase
 
       sub = ont.submissions.first
       sub.bring_remaining
-      sub.pullLocation = RDF::IRI.new('http://localhost:' + server_port.to_s)
+      sub.pullLocation = RDF::IRI.new("http://localhost:#{server_port}")
       assert sub.valid?, "Invalid submission: #{sub.errors}"
       sub.save
     ensure
@@ -142,7 +146,7 @@ class TestOntologyPull < TestCase
         # Restart the web server with a 404 response status, which renders
         # the pullLocation of the ontology submission in this test invalid.
         server = WEBrick::HTTPServer.new(Port: server_port)
-        server.mount_proc '/' do |req, res|
+        server.mount_proc '/' do |_req, res|
           res.status = 404
         end
         begin
@@ -159,7 +163,10 @@ class TestOntologyPull < TestCase
       assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
       user = ont.administeredBy[0]
       user.bring(:email)
-      assert (last_email_sent.to.first.include? user.email) || (last_email_sent.header['Overridden-Sender'].value.include? user.email)
+      assert(
+        last_email_sent.to.first.include?(user.email) ||
+        last_email_sent.header['Overridden-Sender'].value.include?(user.email)
+      )
     ensure
       thread.kill
       sleep 3
@@ -168,7 +175,9 @@ class TestOntologyPull < TestCase
   end
 
   def test_no_pull_location
-    ont_count, acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(ont_count: 1, submission_count: 1, process_submission: false)
+    _ont_count, _acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
+      ont_count: 1, submission_count: 1, process_submission: false
+    )
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:submissions).first
     ont.bring_remaining
     assert ont.valid?, "Invalid ontology: #{ont.errors}"
@@ -192,14 +201,14 @@ class TestOntologyPull < TestCase
 
   def init_ontologies(submission_count, process_submissions = false)
     ont_count, acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
-                            ont_count: 1, submission_count: submission_count, process_submission: process_submissions)
+      ont_count: 1, submission_count: submission_count, process_submission: process_submissions
+    )
     ontologies[0].bring(:submissions) if ontologies[0].bring?(:submissions)
     ontologies[0].submissions.each do |sub|
-      sub.bring_remaining()
+      sub.bring_remaining
       sub.pullLocation = RDF::IRI.new(@@url)
-      sub.save() rescue binding.pry
+      sub.save rescue binding.pry
     end
     ontologies
   end
-
 end
