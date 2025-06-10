@@ -56,6 +56,32 @@ module NcboCron
       end
       # rubocop:enable Metrics/MethodLength
 
+      def process_ontologies(json_data, start_iso, end_iso, year_str, month_str)
+        onts = LinkedData::Models::Ontology.where.include(:acronym).read_only
+        ont_acronyms = onts.all.map(&:acronym).sort_by(&:downcase)
+        # ont_acronyms = %w[MEDDRA NCIT SNOMEDCT]
+        @logger.info "Processing #{ont_acronyms.size} ontologies..."
+
+        ont_acronyms.each_with_index do |id, index|
+          @logger.info "[#{index + 1}/#{ont_acronyms.size}] Fetching data for #{id}..."
+
+          query = build_query(id, start_date: start_iso, end_date: end_iso)
+          data = fetch_graphql(query)
+          next if data.nil?
+
+          result = extract_visits_and_budget(data)
+
+          # Pause when budget gets low (leave buffer for safety)
+          if result[:remaining_queries] && result[:remaining_queries] < 10
+            @logger.warn "Budget almost depleted, waiting 5 minutes..."
+            sleep(300)
+          end
+
+          update_visit_data(json_data, id, result[:visits], year_str, month_str)
+          @logger.info "#{id} had #{result[:visits]} visits"
+        end
+      end
+
       def extract_visits_and_budget(data)
         unless data&.dig('data', 'viewer', 'zones')&.any?
           raise "API response missing expected zones data: #{data.inspect}"
@@ -175,32 +201,6 @@ module NcboCron
           req.headers['Authorization'] = "Bearer #{NcboCron.settings.cloudflare_api_token}"
           req.headers['Content-Type'] = 'application/json'
           req.body = { query: query }.to_json
-        end
-      end
-
-      def process_ontologies(json_data, start_iso, end_iso, year_str, month_str)
-        onts = LinkedData::Models::Ontology.where.include(:acronym).read_only
-        ont_acronyms = onts.all.map(&:acronym).sort_by(&:downcase)
-        # ont_acronyms = %w[MEDDRA NCIT SNOMEDCT]
-        @logger.info "Processing #{ont_acronyms.size} ontologies..."
-
-        ont_acronyms.each_with_index do |id, index|
-          @logger.info "[#{index + 1}/#{ont_acronyms.size}] Fetching data for #{id}..."
-
-          query = build_query(id, start_date: start_iso, end_date: end_iso)
-          data = fetch_graphql(query)
-          next if data.nil?
-
-          result = extract_visits_and_budget(data)
-
-          # Pause when budget gets low (leave buffer for safety)
-          if result[:remaining_queries] && result[:remaining_queries] < 10
-            @logger.warn "Budget almost depleted, waiting 5 minutes..."
-            sleep(300)
-          end
-
-          update_visit_data(json_data, id, result[:visits], year_str, month_str)
-          @logger.info "#{id} had #{result[:visits]} visits"
         end
       end
     end
