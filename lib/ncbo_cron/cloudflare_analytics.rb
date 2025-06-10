@@ -30,6 +30,7 @@ module NcboCron
         <<~GRAPHQL
           {
             viewer {
+              budget
               zones(filter: { zoneTag: "#{NcboCron.settings.cloudflare_zone_tag}" }) {
                 httpRequestsAdaptiveGroups(
                   limit: 10000,
@@ -48,12 +49,13 @@ module NcboCron
                 }
               }
             }
+            cost
           }
         GRAPHQL
       end
       # rubocop:enable Metrics/MethodLength
 
-      def extract_visits(data)
+      def extract_visits_and_budget(data)
         unless data&.dig('data', 'viewer', 'zones')&.any?
           raise "API response missing expected zones data: #{data.inspect}"
         end
@@ -64,9 +66,24 @@ module NcboCron
         end
 
         visits = zone.dig('httpRequestsAdaptiveGroups', 0, 'sum', 'visits')
-        return 0 if visits.nil?
+        budget = data.dig('data', 'viewer', 'budget')
+        cost = data.dig('data', 'cost')
 
-        visits.to_i
+        if budget && cost
+          remaining_queries = budget / cost
+          @logger.info "Query cost: #{cost}, Budget: #{budget}, ~#{remaining_queries} queries remaining"
+
+          if remaining_queries < 50
+            @logger.warn "Budget getting low! Only ~#{remaining_queries} queries remaining"
+          end
+        end
+
+        {
+          visits: visits.nil? ? 0 : visits.to_i,
+          budget: budget,
+          cost: cost,
+          remaining_queries: budget && cost ? budget / cost : nil
+        }
       end
 
       def fetch_graphql(query)
@@ -107,11 +124,20 @@ module NcboCron
       end
 
       def write_updated_data(json_data)
+        @logger.debug("Current working directory: #{Dir.pwd}")
         path = NcboCron.settings.cloudflare_data_file
-        Tempfile.create('bp_cf_data') do |temp|
-          temp.write(JSON.generate(json_data))
-          temp.flush
-          FileUtils.mv(temp.path, path)
+        @logger.debug "Writing Cloudflare Analytics data file to #{File.expand_path(path)}"
+
+        begin
+          Tempfile.create('bp_cf_data') do |temp|
+            temp.write(JSON.generate(json_data))
+            temp.flush
+            FileUtils.mv(temp.path, path)
+            @logger.info "Successfully wrote #{File.size(path)} bytes to #{path}"
+          end
+        rescue StandardError => e
+          @logger.error "File write failed: #{e.class} - #{e.message}"
+          raise
         end
       end
 
@@ -134,35 +160,26 @@ module NcboCron
       def process_ontologies(json_data, start_iso, end_iso, year_str, month_str)
         onts = LinkedData::Models::Ontology.where.include(:acronym).read_only
         ont_acronyms = onts.all.map(&:acronym).sort_by(&:downcase)
+        # ont_acronyms = %w[MEDDRA NCIT SNOMEDCT]
         @logger.info "Processing #{ont_acronyms.size} ontologies..."
 
-        batch_size = 250 # Requests per 5-minute window
-        window_seconds = 300
+        ont_acronyms.each_with_index do |id, index|
+          @logger.info "[#{index + 1}/#{ont_acronyms.size}] Fetching data for #{id}..."
 
-        ont_acronyms.each_slice(batch_size).with_index do |batch, batch_index|
-          batch_start_time = Time.now
-          @logger.info "Processing batch #{batch_index + 1} (#{batch.size} ontologies)..."
+          query = build_query(id, start_date: start_iso, end_date: end_iso)
+          data = fetch_graphql(query)
+          next if data.nil?
 
-          batch.each_with_index do |id, index|
-            global_index = (batch_index * batch_size) + index + 1
-            @logger.info "[#{global_index}/#{ont_acronyms.size}] Fetching data for #{id}..."
+          result = extract_visits_and_budget(data)
 
-            query = build_query(id, start_date: start_iso, end_date: end_iso)
-            data = fetch_graphql(query)
-            next if data.nil?
-
-            visits = extract_visits(data)
-            update_visit_data(json_data, id, visits, year_str, month_str)
-            @logger.info "#{id} had #{visits} visits"
+          # Pause when budget gets low (leave buffer for safety)
+          if result[:remaining_queries] && result[:remaining_queries] < 10
+            @logger.warn "Budget almost depleted, waiting 5 minutes..."
+            sleep(300)
           end
 
-          # Wait for the full window before starting next batch
-          elapsed = Time.now - batch_start_time
-          if elapsed < window_seconds
-            sleep_time = window_seconds - elapsed
-            @logger.info "Batch complete. Waiting #{sleep_time.round(1)}s before next batch..."
-            sleep(sleep_time)
-          end
+          update_visit_data(json_data, id, result[:visits], year_str, month_str)
+          @logger.info "#{id} had #{result[:visits]} visits"
         end
       end
     end
