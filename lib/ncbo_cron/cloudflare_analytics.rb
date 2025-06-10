@@ -18,6 +18,7 @@ module NcboCron
 
         process_ontologies(json_data, start_iso, end_iso, yesterday.year.to_s, yesterday.month.to_s)
         write_updated_data(json_data)
+        write_to_redis(json_data)
 
         end_time = Time.now
         duration = (end_time - start_time).round(2)
@@ -138,6 +139,26 @@ module NcboCron
         rescue StandardError => e
           @logger.error "File write failed: #{e.class} - #{e.message}"
           raise
+        end
+      end
+
+      def write_to_redis(json_data)
+        @logger.info 'Writing data to Redis...'
+
+        begin
+          redis = Redis.new(host: LinkedData.settings.ontology_analytics_redis_host,
+                            port: LinkedData.settings.ontology_analytics_redis_port)
+          redis.set('cloudflare_analytics', Marshal.dump(json_data))
+          @logger.info 'Successfully wrote data to Redis'
+        rescue Redis::BaseError => e
+          @logger.error "Redis operation failed: #{e.message}"
+          raise "Failed to write to Redis: #{e.message}"
+        rescue StandardError => e
+          @logger.error "Unexpected error writing to Redis: #{e.class} - #{e.message}"
+          raise
+        ensure
+          redis&.close
+          @logger.debug 'Redis connection closed'
         end
       end
 
