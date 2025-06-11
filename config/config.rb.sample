@@ -69,6 +69,15 @@ NcboCron.config do |config|
   config.search_index_all_url = "http://localhost:8983/solr/term_search_core2"
   config.property_search_index_all_url = "http://localhost:8983/solr/prop_search_core2"
 
+  # Sample configuration for Cloudflare Analytics integration
+  # Cloudflare Zone Tag (unique identifier for your Cloudflare zone)
+  config.cloudflare_zone_tag  = 'your-zone-tag-here'
+  # API token with read-only access to the Cloudflare GraphQL Analytics API
+  # Recommended scopes: Zone.Analytics:Read
+  config.cloudflare_api_token = 'your-cloudflare-api-token-here'
+  # Path to the JSON file where ontology pageview data is stored and updated
+  config.cloudflare_data_file = 'config/data/bp_cf_data.json'
+
   # Google Analytics GA4 config
   config.analytics_path_to_key_file     = "config/your_analytics_key.json"
   config.analytics_property_id          = "123456789"
