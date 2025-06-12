@@ -156,6 +156,15 @@ module NcboCron
         @logger.debug "Writing Cloudflare Analytics data file to #{File.expand_path(path)}"
 
         begin
+          if File.exist?(path)
+            timestamp = Time.now.strftime('%Y%m%d_%H%M%S')
+            backup_path = "#{path}.backup_#{timestamp}"
+
+            @logger.info "Creating backup: #{backup_path}"
+            FileUtils.cp(path, backup_path)
+            @logger.info "Backup created successfully"
+          end
+
           Tempfile.create('bp_cf_data') do |temp|
             temp.write(JSON.generate(json_data))
             temp.flush
