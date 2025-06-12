@@ -3,8 +3,8 @@
 module NcboCron
   module Models
     class CloudflareAnalytics
-      def initialize
-        @logger = Logger.new($stdout)
+      def initialize(logger = nil)
+        @logger = logger || Logger.new($stdout)
       end
 
       def run
@@ -212,4 +212,25 @@ end
 # require 'ncbo_annotator'
 # require 'ncbo_cron/config'
 # require_relative '../../config/config'
+#
+# Run (output to stdout)
 # NcboCron::Models::CloudflareAnalytics.new.run
+#
+# Run (output to log file)
+# logger = Logger.new(File.join('log', 'cloudflare-analytics.log'))
+# NcboCron::Models::CloudflareAnalytics.new(logger).run
+#
+# Run (shell command syntax example)
+# ./bin/ncbo_cron \
+#   --disable-processing true \
+#   --disable-pull true \
+#   --disable-flush true \
+#   --disable-warmq true \
+#   --disable-mapping-counts true \
+#   --disable-ontology-analytics true \
+#   --disable-ontologies-report true \
+#   --disable-index-synchronizer true \
+#   --disable-spam-deletion true \
+#   --disable-update-check true \
+#   --disable-obofoundry_sync true \
+#   --cloudflare-analytics '* * * * *'
