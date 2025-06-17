@@ -54,7 +54,7 @@ class TestCase < Minitest::Test
 
   def before_all
     super
-    WebMock.disable_net_connect!(allow_localhost: true)
+    WebMock.allow_net_connect!
     backend_triplestore_delete
   end
 
