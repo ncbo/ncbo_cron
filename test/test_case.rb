@@ -17,6 +17,8 @@ end
 
 require 'minitest/autorun'
 require 'minitest/hooks/test'
+require 'mocha/minitest'
+require 'webmock/minitest'
 require 'ontologies_linked_data'
 require_relative '../lib/ncbo_cron'
 require_relative '../config/config'
@@ -52,11 +54,13 @@ class TestCase < Minitest::Test
 
   def before_all
     super
+    WebMock.disable_net_connect!(allow_localhost: true)
     backend_triplestore_delete
   end
 
   def after_all
     super
+    WebMock.reset!
   end
 
   # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
