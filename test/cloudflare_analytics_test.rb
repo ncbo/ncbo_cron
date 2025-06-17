@@ -277,6 +277,9 @@ class CloudflareAnalyticsTest < TestCase
   def test_write_to_redis_success
     json_data = { 'TEST_ONT' => { '2024' => { '6' => 100 } } }
 
+    LinkedData.settings.stubs(:ontology_analytics_redis_host).returns('localhost')
+    LinkedData.settings.stubs(:ontology_analytics_redis_port).returns(6379)
+
     mock_redis = mock('redis')
     mock_redis.expects(:set).with('cloudflare_analytics', Marshal.dump(json_data))
     mock_redis.expects(:close)
@@ -285,9 +288,6 @@ class CloudflareAnalyticsTest < TestCase
       host: LinkedData.settings.ontology_analytics_redis_host,
       port: LinkedData.settings.ontology_analytics_redis_port
     ).returns(mock_redis)
-
-    LinkedData.settings.stubs(:ontology_analytics_redis_host).returns('localhost')
-    LinkedData.settings.stubs(:ontology_analytics_redis_port).returns(6379)
 
     @analytics.send(:write_to_redis, json_data)
 
