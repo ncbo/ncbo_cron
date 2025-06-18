@@ -167,8 +167,10 @@ opt_parser.parse!
 # Verify options: daemon mode takes a back seat to other options.
 if options[:view_queue] || options[:queue_submission] || options[:console] || options.include?(:kill)
   options[:daemonize] = false
-  # The Dante runner will automatically redirect logs on runner.execute, if this option is set.
-  options.delete(:log_path) # remove this here for more control over logging
+  # For interactive modes (view_queue, queue_submission, console), we don't want to write to a log file.
+  # Setting log_path to nil tells Dante to redirect output to /dev/null instead of a log file.
+  # This ensures output goes to stdout/stderr for user interaction.
+  options[:log_path] = nil
 end
 if options[:daemonize] || options.include?(:kill)
   options[:console] = false
@@ -180,12 +182,14 @@ end
 # Update the NcboCron.settings with CLI options
 options.each_pair {|k,v| NcboCron.settings[k] = v}
 
-# create log dir
-log_dir = File.dirname(options[:log_path])
-begin
-  FileUtils.mkdir_p(log_dir) unless File.directory?(log_dir)
-rescue SystemCallError => e
-  abort "Cannot create log directory #{log_dir}: #{e.message}"
+# create log dir only in daemon mode
+if options[:daemonize]
+  log_dir = File.dirname(options[:log_path])
+  begin
+    FileUtils.mkdir_p(log_dir) unless File.directory?(log_dir)
+  rescue SystemCallError => e
+    abort "Cannot create log directory #{log_dir}: #{e.message}"
+  end
 end
 
 # Configure the process controller
