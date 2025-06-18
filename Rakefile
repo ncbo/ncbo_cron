@@ -4,7 +4,7 @@ task default: :test
 
 Rake::TestTask.new do |t|
   t.libs = []
-  t.test_files = FileList['test/**/test*.rb']
+  t.test_files = FileList['test/**/test*.rb', 'test/**/*_test.rb']
   t.ruby_opts = ['-W1']
 end
 
@@ -21,7 +21,7 @@ def clear_cache
 end
 
 namespace :cache do
-  desc "Clear HTTP cache (redis and Rack::Cache)"
+  desc 'Clear HTTP cache (redis and Rack::Cache)'
   task :clear do
     clear_cache
   end
