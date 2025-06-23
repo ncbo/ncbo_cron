@@ -9,6 +9,7 @@ gem 'ffi'
 # The ability to pull this data from Google will cease on July 1, 2024
 gem "google-apis-analytics_v3"
 
+gem 'activesupport', '~> 5' # Pinning to v5 due to known compatibility issues with newer versions.
 gem 'google-analytics-data'
 gem 'multi_json'
 gem 'oj', '~> 3.0'
