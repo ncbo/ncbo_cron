@@ -136,8 +136,20 @@ module NcboCron
 
       def update_visit_data(json_data, ontology, count, year, month)
         json_data[ontology] ||= {}
-        json_data[ontology][year] ||= {}
-        json_data[ontology][year][month] ||= 0
+
+        start_year = 2013
+        current_year = Date.today.year
+
+        (start_year..current_year).each do |y|
+          year_str = y.to_s
+          json_data[ontology][year_str] ||= {}
+
+          (1..12).each do |m|
+            month_str = m.to_s
+            json_data[ontology][year_str][month_str] ||= 0
+          end
+        end
+
         json_data[ontology][year][month] += count
       end
 

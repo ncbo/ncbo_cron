@@ -30,6 +30,28 @@ class CloudflareAnalyticsTest < TestCase
     assert_equal 75, json_data['EXISTING_ONT']['2024']['6']
   end
 
+  def test_update_visit_data_backfills_all_years_and_months
+    json_data = {}
+    ontology = 'TESTONT'
+    year = '2025'
+    month = '6'
+    count = 42
+
+    @analytics.update_visit_data(json_data, ontology, count, year, month)
+
+    assert_includes json_data, ontology
+    (2013..Date.today.year).each do |yr|
+      yr_str = yr.to_s
+      assert_includes json_data[ontology], yr_str
+      (1..12).each do |mo|
+        mo_str = mo.to_s
+        assert_includes json_data[ontology][yr_str], mo_str
+        expected = (yr_str == year && mo_str == month) ? count : 0
+        assert_equal expected, json_data[ontology][yr_str][mo_str], "Expected #{expected} for #{yr_str}-#{mo_str}"
+      end
+    end
+  end
+
   def test_extract_visits_and_budget_success
     api_response = {
       'data' => {
