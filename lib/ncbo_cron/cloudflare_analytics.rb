@@ -178,7 +178,8 @@ module NcboCron
           end
 
           Tempfile.create('bp_cf_data') do |temp|
-            temp.write(JSON.generate(json_data))
+            sorted = json_data.sort_by { |acronym, _| acronym.downcase }.to_h
+            temp.write(JSON.generate(sorted))
             temp.flush
             FileUtils.cp(temp.path, path)
             @logger.info "Successfully wrote #{File.size(path)} bytes to #{path}"
