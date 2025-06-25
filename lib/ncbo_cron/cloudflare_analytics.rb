@@ -73,7 +73,7 @@ module NcboCron
 
           # Pause when budget gets low (leave buffer for safety)
           if result[:remaining_queries] && result[:remaining_queries] < 10
-            @logger.warn "Budget almost depleted, waiting 5 minutes..."
+            @logger.warn 'Budget almost depleted, waiting 5 minutes...'
             sleep(300)
           end
 
@@ -174,7 +174,7 @@ module NcboCron
 
             @logger.info "Creating backup: #{backup_path}"
             FileUtils.cp(path, backup_path)
-            @logger.info "Backup created successfully"
+            @logger.info 'Backup created successfully'
           end
 
           Tempfile.create('bp_cf_data') do |temp|
