@@ -168,7 +168,7 @@ module NcboCron
           Tempfile.create('bp_cf_data') do |temp|
             temp.write(JSON.generate(json_data))
             temp.flush
-            FileUtils.mv(temp.path, path)
+            FileUtils.cp(temp.path, path)
             @logger.info "Successfully wrote #{File.size(path)} bytes to #{path}"
           end
         rescue StandardError => e
