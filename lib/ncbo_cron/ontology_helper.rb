@@ -21,8 +21,18 @@ module NcboCron
         attr_reader :submission
 
         def initialize(submission)
-          super
           @submission = submission
+          location = submission.pullLocation || "unspecified location"
+          super("RemoteFileException: No remote file found for submission #{submission.id} at #{location}")
+        end
+      end
+
+      class MissingPullLocationException < StandardError
+        attr_reader :acronym
+
+        def initialize(acronym)
+          super("MissingPullLocationException: Ontology #{acronym} has no pullLocation")
+          @acronym = acronym
         end
       end
 
@@ -42,7 +52,7 @@ module NcboCron
         end
 
         last.bring(:pullLocation) if last.bring?(:pullLocation)
-        raise StandardError, "#{ontology_acronym} has no pullLocation" if last.pullLocation.nil?
+        raise MissingPullLocationException.new(ontology_acronym) if last.pullLocation.nil?
 
         last.bring(:uploadFilePath) if last.bring?(:uploadFilePath)
 
@@ -52,26 +62,23 @@ module NcboCron
           logger.flush
         end
 
-        if last.remote_file_exists?(last.pullLocation.to_s)
-          logger.info "Checking download for #{ont.acronym}"
-          logger.info "Location: #{last.pullLocation.to_s}"; logger.flush
-          file, filename = last.download_ontology_file
-          file, md5local, md5remote, new_file_exists = self.new_file_exists?(file, last)
+        raise self::RemoteFileException.new(last) unless last.remote_file_exists?(last.pullLocation.to_s)
+        logger.info "Checking download for #{ont.acronym}"
+        logger.info "Location: #{last.pullLocation.to_s}"; logger.flush
+        file, filename = last.download_ontology_file
+        file, md5local, md5remote, new_file_exists = self.new_file_exists?(file, last)
 
-          if new_file_exists
-            logger.info "New file found for #{ont.acronym}\nold: #{md5local}\nnew: #{md5remote}"
-            logger.flush()
-            new_submission = self.create_submission(ont, last, file, filename, logger, add_to_queue)
-          else
-            logger.info "There is no new file found for #{ont.acronym}"
-            logger.flush()
-          end
-
-          file.close
-          new_submission
+        if new_file_exists
+          logger.info "New file found for #{ont.acronym}\nold: #{md5local}\nnew: #{md5remote}"
+          logger.flush()
+          new_submission = self.create_submission(ont, last, file, filename, logger, add_to_queue)
         else
-          raise self::RemoteFileException.new(last)
+          logger.info "There is no new file found for #{ont.acronym}"
+          logger.flush()
         end
+
+        file.close
+        new_submission
       end
 
       def self.create_submission(ont, sub, file, filename, logger = nil, add_to_queue = true, new_version = nil,
