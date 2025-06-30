@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: ac63d2bf959a820b82aff4ae6850555ff2f5d33f
+  revision: 67169f3264aaa73c6619a599907a3c724535a69f
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -203,7 +203,7 @@ GEM
       concurrent-ruby (~> 1.0)
     json (2.12.2)
     json_pure (2.8.1)
-    jwt (2.10.1)
+    jwt (2.10.2)
       base64
     language_server-protocol (3.17.0.5)
     launchy (3.1.1)
@@ -224,7 +224,7 @@ GEM
     mime-types (3.7.0)
       logger
       mime-types-data (~> 3.2025, >= 3.2025.0507)
-    mime-types-data (3.2025.0617)
+    mime-types-data (3.2025.0624)
     mini_mime (1.1.5)
     minitest (5.25.5)
     minitest-hooks (1.5.2)
