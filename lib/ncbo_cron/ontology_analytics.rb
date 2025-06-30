@@ -19,8 +19,15 @@ module NcboCron
       def run
         redis = Redis.new(:host => LinkedData.settings.ontology_analytics_redis_host, :port => LinkedData.settings.ontology_analytics_redis_port)
         ontology_analytics = fetch_ontology_analytics
-        File.open(NcboCron.settings.analytics_path_to_ga_data_file, 'w') do |f|
-          f.write(ontology_analytics.to_json)
+        begin
+          @logger.debug("Current working directory: #{Dir.pwd}")
+          absolute_path = File.expand_path(NcboCron.settings.analytics_path_to_ga_data_file)
+          @logger.debug "Writing Google Analytics data file to #{absolute_path}"
+          File.open(NcboCron.settings.analytics_path_to_ga_data_file, 'w') do |f|
+            f.write(ontology_analytics.to_json)
+          end
+        rescue StandardError => e
+          @logger.error "Failed to write Google Analytics data file: #{e.message}"
         end
         redis.set(ONTOLOGY_ANALYTICS_REDIS_FIELD, Marshal.dump(ontology_analytics))
       end

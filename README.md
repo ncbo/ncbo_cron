@@ -3,6 +3,7 @@ This repository contains scheduled tasks that support the ongoing operations of 
 [BioPortal](https://bioportal.bioontology.org/) ontology repository.
 
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ncbo/ncbo_cron/ruby-unit-tests.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ncbo/ncbo_cron)
 
 ## Contact
 Please don't file issues to ask questions. You'll get the fastest response by sending a message to our 

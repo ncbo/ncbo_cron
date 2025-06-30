@@ -29,8 +29,10 @@ module NcboCron
     @settings.enable_flush ||= true
     @settings.enable_warmq ||= true
     @settings.enable_mapping_counts ||= true
-    # enable ontology analytics
+    # enable ontology analytics (GA4)
     @settings.enable_ontology_analytics ||= true
+    # enable ontology analytics (cloudflare)
+    @settings.enable_cloudflare_analytics ||= true
     # enable ontologies report
     @settings.enable_ontologies_report ||= true
     # enable index synchronization
@@ -61,6 +63,9 @@ module NcboCron
     # Ontology analytics refresh schedule
     # 15 0 * * 1 - run once a week on Monday at 12:15AM
     @settings.cron_ontology_analytics ||= "15 0 * * 1"
+    # Cloudflare analytics schedule
+    # 0 1 * * * - run daily at 1:00am
+    @settings.cron_cloudflare_analytics ||= '0 1 * * *'
     # Ontologies report generation schedule
     # 30 1 * * * - run daily at 1:30AM
     @settings.cron_ontologies_report ||= "30 1 * * *"

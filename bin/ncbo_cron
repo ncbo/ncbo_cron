@@ -99,6 +99,9 @@ opt_parser = OptionParser.new do |opts|
   opts.on("--disable-ontology-analytics", "disable ontology analytics refresh", "(default: #{options[:enable_ontology_analytics]})") do |v|
     options[:enable_ontology_analytics] = false
   end
+  opts.on("--disable-cloudflare-analytics", "disable Cloudflare analytics job", "(default: #{options[:enable_cloudflare_analytics]})") do |v|
+    options[:enable_cloudflare_analytics] = false
+  end
   opts.on("--disable-ontologies-report", "disable ontologies report generation", "(default: #{options[:enable_ontologies_report]})") do |v|
     options[:enable_ontologies_report] = false
   end
@@ -131,6 +134,9 @@ opt_parser = OptionParser.new do |opts|
   end  
   opts.on("--create-mapping-counts SCHED", String, "cron schedule to create mapping counts", "(default: #{options[:cron_mapping_counts]})") do |c|
     options[:cron_mapping_counts] = c
+  end
+  opts.on("--cloudflare-analytics SCHED", String, "cron schedule to run Cloudflare analytics job", "(default: #{options[:cron_cloudflare_analytics]})") do |c|
+    options[:cron_cloudflare_analytics] = c
   end
   opts.on("--ontology-analytics SCHED", String, "cron schedule to run ontology analytics refresh", "(default: #{options[:cron_ontology_analytics]})") do |c|
     options[:cron_ontology_analytics] = c
@@ -167,8 +173,10 @@ opt_parser.parse!
 # Verify options: daemon mode takes a back seat to other options.
 if options[:view_queue] || options[:queue_submission] || options[:console] || options.include?(:kill)
   options[:daemonize] = false
-  # The Dante runner will automatically redirect logs on runner.execute, if this option is set.
-  options.delete(:log_path) # remove this here for more control over logging
+  # For interactive modes (view_queue, queue_submission, console), we don't want to write to a log file.
+  # Setting log_path to nil tells Dante to redirect output to /dev/null instead of a log file.
+  # This ensures output goes to stdout/stderr for user interaction.
+  options[:log_path] = nil
 end
 if options[:daemonize] || options.include?(:kill)
   options[:console] = false
@@ -180,12 +188,14 @@ end
 # Update the NcboCron.settings with CLI options
 options.each_pair {|k,v| NcboCron.settings[k] = v}
 
-# create log dir
-log_dir = File.dirname(options[:log_path])
-begin
-  FileUtils.mkdir_p(log_dir) unless File.directory?(log_dir)
-rescue SystemCallError => e
-  abort "Cannot create log directory #{log_dir}: #{e.message}"
+# create log dir only in daemon mode
+if options[:daemonize]
+  log_dir = File.dirname(options[:log_path])
+  begin
+    FileUtils.mkdir_p(log_dir) unless File.directory?(log_dir)
+  rescue SystemCallError => e
+    abort "Cannot create log directory #{log_dir}: #{e.message}"
+  end
 end
 
 # Configure the process controller
@@ -374,6 +384,26 @@ runner.execute do |opts|
     end
   end
 
+  if options[:enable_cloudflare_analytics]
+    cloudflare_analytics_thread = Thread.new do
+      cloudflare_analytics_options = options.dup
+      cloudflare_analytics_options[:job_name] = 'ncbo_cron_cloudflare_analytics'
+      cloudflare_analytics_options[:scheduler_type] = :cron
+      cloudflare_analytics_options[:cron_schedule] = cloudflare_analytics_options[:cron_cloudflare_analytics]
+      logger.info "Setting up Cloudflare analytics job with #{cloudflare_analytics_options[:cron_cloudflare_analytics]}"; logger.flush
+      cloudflare_analytics_log_path = File.join(log_path, "#{log_filename_noExt}-cloudflare-analytics.log")
+      cloudflare_analytics_logger = Logger.new(cloudflare_analytics_log_path)
+      NcboCron::Scheduler.scheduled_locking_job(cloudflare_analytics_options) do
+        logger.info "Starting Cloudflare analytics job"; logger.flush
+        logger.info "Logging Cloudflare analytics job details to #{cloudflare_analytics_log_path}"; logger.flush
+        t0 = Time.now
+        NcboCron::Models::CloudflareAnalytics.new(cloudflare_analytics_logger).run
+        logger.info "Cloudflare analytics job completed in #{Time.now - t0} sec."; logger.flush
+        logger.info 'Finished Cloudflare analytics job'; logger.flush
+      end
+    end
+  end
+
   if options[:enable_ontologies_report]
     ontologies_report_thread = Thread.new do
       ontologies_report_options = options.dup
@@ -510,6 +540,7 @@ runner.execute do |opts|
   flush_thread.join if flush_thread
   warmq_thread.join if warmq_thread
   analytics_thread.join if analytics_thread
+  cloudflare_analytics_thread.join if cloudflare_analytics_thread
   ontologies_report_thread.join if ontologies_report_thread
   index_synchronizer_thread.join if index_synchronizer_thread
   spam_deletion_thread.join if spam_deletion_thread
