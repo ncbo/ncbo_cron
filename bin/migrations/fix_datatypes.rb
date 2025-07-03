@@ -12,14 +12,16 @@ Contact = LinkedData::Models::Contact
 # ont_acronyms = ["RDA-ISSUANCE"]
 # ont_acronyms = ["BAO"]
 # ont_acronyms = ["MI"]
-# ont_acronyms = ["OHD"]
+# ont_acronyms = ["WHO"]
+# ont_acronyms = ["MEDDRA"]
+# ont_acronyms = ["WINDENERGY", "MEDDRA"]
 # ont_acronyms = ["MMO"]
 # ont_acronyms = ["MF"]
 # ont_acronyms = ["ONTODM-CORE"]
 # ont_acronyms = ["FAST-FORMGENRE"]
 # ont_acronyms = ["ALLERGYDETECTOR"]
 # ont_acronyms = ["WETAXTOPICS"]
-# ont_acronyms = ["ONTODRC"]
+# ont_acronyms = ["H1_NMOABA_4_1"]
 
 onts = []
 SPACER = "\n\n\n"
@@ -28,6 +30,13 @@ UNKNOWN_CONTACT = {
   email: "noreply@bioontology.org"
 }
 DEFAULT_URI = "http://www.example.com"
+KNOWN_PREDICATES = {
+  contact: RDF::URI.new("#{Goo.namespaces[:metadata].to_s}contact"),
+  documentation: RDF::URI.new("#{Goo.namespaces[:omv].to_s}documentation"),
+  homepage: RDF::URI.new("#{Goo.namespaces[:metadata].to_s}homepage"),
+  publication: RDF::URI.new("#{Goo.namespaces[:metadata].to_s}publication"),
+  uri: RDF::URI.new("#{Goo.namespaces[:omv].to_s}uri")
+}
 
 def fix_invalid_uri(value, logger:, default_scheme: "http", fallback_uri: DEFAULT_URI)
   if value.nil? || value.to_s.strip.empty?
@@ -91,10 +100,31 @@ rescue NameError => e
   nil
 end
 
+def delete_original_value(sub, attribute_name, logger:)
+  query = <<eof
+DELETE {
+  GRAPH <#{sub.graph.to_s}> {
+    <#{sub.id.to_s}> <#{KNOWN_PREDICATES[attribute_name.to_sym].to_s}> ?o .
+  }
+}
+WHERE {
+  GRAPH <#{sub.graph.to_s}> {
+    <#{sub.id.to_s}> <#{KNOWN_PREDICATES[attribute_name.to_sym].to_s}> ?o .
+  }
+}
+eof
+  Goo.sparql_query_client.update(query)
+  logger.info("Deleted original value of #{attribute_name} for #{sub.id.to_s}")
+end
+
 def fix_single_attribute(sub, attribute_name, klass, logger)
   original_value = sub.send(attribute_name)
   casted_value = klass.new(original_value)
   casted_value = additional_datatype_fix(klass, casted_value, logger)
+
+  # Delete original value(s) to avoid duplicates due to a different datatype
+  delete_original_value(sub, attribute_name, logger: logger)
+
   sub.send("#{attribute_name}=", casted_value)
   logger.info("Attribute \"#{attribute_name}\". Replaced \"#{original_value}\" with \"#{klass}('#{casted_value}')\"")
 rescue => e
@@ -113,7 +143,10 @@ def fix_array_attribute(sub, attribute_name, klass, logger)
       logger.error("Skipping value '#{val}' for #{attribute_name}: #{e.message}")
       nil
     end
-  end.compact
+  end.compact.uniq
+
+  # Delete original value(s) to avoid duplicates due to a different datatype
+  delete_original_value(sub, attribute_name, logger: logger)
 
   sub.send("#{attribute_name}=", casted_values)
   logger.info("Attribute \"#{attribute_name}\". Cast each list value to #{klass}: #{casted_values.inspect}")
@@ -150,6 +183,28 @@ def process_errors(sub, error_hash, logger)
         fix_array_attribute(sub, attribute_name, klass, logger) if klass
       end
     end
+  end
+end
+
+def process_homepage(sub, logger)
+  query = <<eof
+SELECT ?o
+FROM <#{sub.graph.to_s}>
+WHERE {
+  <#{sub.id.to_s}> <#{KNOWN_PREDICATES[:homepage].to_s}> ?o .
+}
+eof
+  rs = Goo.sparql_query_client.query(query)
+
+  unless rs.empty?
+    old_val = rs[0][:o].object
+
+    # Delete original value(s) to avoid duplicates due to a different datatype
+    delete_original_value(sub, :homepage, logger: logger)
+
+    new_val = fix_invalid_uri(old_val, logger: logger)
+    sub.homepage = new_val
+    logger.info("Attribute homepage. Replaced \"#{old_val}\" with \"RDF::URI('#{new_val}')\"")
   end
 end
 
@@ -196,6 +251,7 @@ onts.each do |ont|
 
     if error_hash && !error_hash.empty?
       process_errors(sub, error_hash, logger)
+      process_homepage(sub, logger)
       ensure_valid_does_not_crash(sub, logger: logger)
 
       if sub.valid?
