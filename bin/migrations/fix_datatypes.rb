@@ -22,6 +22,7 @@ Contact = LinkedData::Models::Contact
 # ont_acronyms = ["WETAXTOPICS"]
 # ont_acronyms = ["H1_NMOABA_4_1"]
 # ont_acronyms = ["XAO"]
+ont_acronyms = ["BCON"]
 
 onts = []
 SPACER = "\n\n\n"
@@ -119,11 +120,9 @@ def process_single_attribute(sub, attribute_name, logger:)
     }
   SPARQL
   rs = Goo.sparql_query_client.query(query)
-  old_vals = []
   new_vals = []
 
   rs.each do |result|
-    old_vals << result[:o]
     new_vals << fix_invalid_uri(result[:o].to_s, logger: logger)
     break if ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single]
   end
