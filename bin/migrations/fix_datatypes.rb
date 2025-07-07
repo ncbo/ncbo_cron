@@ -111,7 +111,6 @@ def delete_original_value(sub, attribute_name, logger:)
 end
 
 def process_single_attribute(sub, attribute_name, logger:)
-  is_single = ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single]
   query = <<~SPARQL
     SELECT ?o
     FROM <#{sub.graph.to_s}>
