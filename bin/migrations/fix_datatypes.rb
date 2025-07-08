@@ -22,7 +22,8 @@ Contact = LinkedData::Models::Contact
 # ont_acronyms = ["WETAXTOPICS"]
 # ont_acronyms = ["H1_NMOABA_4_1"]
 # ont_acronyms = ["XAO"]
-ont_acronyms = ["BCON"]
+# ont_acronyms = ["BCON"]
+# ont_acronyms = ["OF"]
 
 onts = []
 SPACER = "\n\n\n"
@@ -31,22 +32,26 @@ UNKNOWN_CONTACT = {
   email: "noreply@bioontology.org"
 }
 DEFAULT_URI = "http://www.example.com"
-ATTRIBUTES_TO_FIX = {
+URI_ATTRIBUTES_TO_FIX = {
   documentation: {
     predicate: RDF::URI.new("#{Goo.namespaces[:omv].to_s}documentation"),
-    is_single: true
+    is_single: true,
+    is_required: false
   },
   homepage: {
     predicate: RDF::URI.new("#{Goo.namespaces[:metadata].to_s}homepage"),
-    is_single: true
+    is_single: true,
+    is_required: false
   },
   publication: {
     predicate: RDF::URI.new("#{Goo.namespaces[:metadata].to_s}publication"),
-    is_single: false
+    is_single: false,
+    is_required: false
   },
   uri: {
     predicate: RDF::URI.new("#{Goo.namespaces[:omv].to_s}uri"),
-    is_single: true
+    is_single: true,
+    is_required: true
   }
 }
 
@@ -97,12 +102,12 @@ def delete_original_value(sub, attribute_name, logger:)
   query = <<~SPARQL
     DELETE {
       GRAPH <#{sub.graph.to_s}> {
-        <#{sub.id.to_s}> <#{ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
+        <#{sub.id.to_s}> <#{URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
       }
     }
     WHERE {
       GRAPH <#{sub.graph.to_s}> {
-        <#{sub.id.to_s}> <#{ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
+        <#{sub.id.to_s}> <#{URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
       }
     }
   SPARQL
@@ -110,38 +115,49 @@ def delete_original_value(sub, attribute_name, logger:)
   logger.info("Deleted original value of #{attribute_name} for #{sub.id.to_s}")
 end
 
-def process_single_attribute(sub, attribute_name, logger:)
+def process_uri_attribute(sub, attribute_name, logger:)
   query = <<~SPARQL
     SELECT ?o
     FROM <#{sub.graph.to_s}>
     WHERE {
-      <#{sub.id.to_s}> <#{ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
+      <#{sub.id.to_s}> <#{URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:predicate].to_s}> ?o .
     }
   SPARQL
   rs = Goo.sparql_query_client.query(query)
   new_vals = []
 
-  rs.each do |result|
-    new_vals << fix_invalid_uri(result[:o].to_s, logger: logger)
-    break if ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single]
-  end
+  if rs.empty? && URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_required]
+    def_uri = RDF::URI.new(DEFAULT_URI)
+    logger.warn("Attribute #{attribute_name} is required but not found. Assigned the default value: #{def_uri.inspect}")
+    sub.send("#{attribute_name}=", def_uri)
+  else
+    rs.each do |result|
+      new_vals << fix_invalid_uri(result[:o].to_s, logger: logger)
+      break if URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single]
+    end
 
-  unless rs.empty?
-    casted_val = ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single] ? new_vals.first : new_vals.compact.uniq
-    delete_original_value(sub, attribute_name, logger: logger)
-    sub.send("#{attribute_name}=", casted_val)
-    logger.info("Attribute #{attribute_name}. Corrected value: #{casted_val.inspect}')")
+    unless rs.empty?
+      casted_val = URI_ATTRIBUTES_TO_FIX[attribute_name.to_sym][:is_single] ? new_vals.first : new_vals.compact.uniq
+      delete_original_value(sub, attribute_name, logger: logger)
+      sub.send("#{attribute_name}=", casted_val)
+      logger.info("Attribute #{attribute_name}. Corrected value: #{casted_val.inspect}')")
+    end
   end
 rescue => e
   logger.error("Error assigning #{attribute_name} to #{casted_val.inspect}: #{e.message}#{SPACER}")
 end
 
-def fix_contact(sub, logger:)
-  return if sub.contact
+def default_contact
   contact = Contact.where(email: UNKNOWN_CONTACT[:email]).first
   contact = Contact.new(UNKNOWN_CONTACT).save unless contact
-  sub.contact = [contact]
-  logger.info("Contact for #{sub.id.to_s} was empty. Added default contact: \"#{UNKNOWN_CONTACT.inspect}\"")
+  [contact]
+end
+
+def fix_contact(sub, fallback_contact: nil, logger:)
+  return if sub.contact && !sub.contact.empty?
+  contact = fallback_contact || default_contact
+  sub.contact = contact
+  logger.info("Contact attribute is required but not found. Assigned the default value: #{UNKNOWN_CONTACT.inspect}")
 end
 
 # ---------------
@@ -151,6 +167,7 @@ end
 logger = Logger.new($stdout)
 unfixed_acronyms = []
 start_time = Time.now
+fallback_contact = default_contact
 
 if !defined?(ont_acronyms) || ont_acronyms.empty?
   onts = Ontology.where.include(Ontology.attributes).all
@@ -177,11 +194,11 @@ onts.each do |ont|
 
     ensure_valid_does_not_crash(sub, logger: logger)
 
-    ATTRIBUTES_TO_FIX.each_key { |name|
-      process_single_attribute(sub, name, logger: logger)
+    URI_ATTRIBUTES_TO_FIX.each_key { |name|
+      process_uri_attribute(sub, name, logger: logger)
     }
 
-    fix_contact(sub, logger: logger)
+    fix_contact(sub, fallback_contact: fallback_contact, logger: logger)
 
     if sub.valid?
       sub.save
