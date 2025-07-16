@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: b9019ad9e1eb78c74105fc6c6a879085066da17d
-  branch: master
+  revision: 87a21a76bc61392d0629a19c8a18593f606b52e5
+  branch: develop
   specs:
     goo (0.0.2)
       addressable (~> 2.8)
@@ -16,8 +16,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: 4fb9114b80b99f0a654c7f70aaa96839c74fc615
-  branch: master
+  revision: 6671099a39fffa8b98f21db7593cef35dd296b65
+  branch: develop
   specs:
     ncbo_annotator (0.0.1)
       goo
@@ -27,8 +27,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 9e0ccb79e3cd00c9b75ec0f8d6a2494366a92ec6
-  branch: master
+  revision: d55bddd1a06eeec7353525b7d7ceba095cc756a1
+  branch: develop
   specs:
     ontologies_linked_data (0.0.1)
       activesupport
@@ -49,7 +49,7 @@ GIT
 GIT
   remote: https://github.com/ncbo/sparql-client.git
   revision: 512edc320b43e83971835dc046b4923485e8f70e
-  branch: master
+  tag: v6.3.0
   specs:
     sparql-client (1.0.1)
       json_pure (>= 1.4)
@@ -106,7 +106,7 @@ GEM
       htmlentities (~> 4.3.3)
       launchy (>= 2.1, < 4.0)
       mail (~> 2.7)
-    faraday (2.13.1)
+    faraday (2.13.2)
       faraday-net_http (>= 2.0, < 3.5)
       json
       logger
@@ -252,7 +252,7 @@ GEM
     mime-types (3.7.0)
       logger
       mime-types-data (~> 3.2025, >= 3.2025.0507)
-    mime-types-data (3.2025.0624)
+    mime-types-data (3.2025.0708)
     mini_mime (1.1.5)
     minitest (5.25.5)
     minitest-hooks (1.5.2)
@@ -313,7 +313,7 @@ GEM
       addressable (>= 2.2)
     redis (5.4.0)
       redis-client (>= 0.22.0)
-    redis-client (0.25.0)
+    redis-client (0.25.1)
       connection_pool
     regexp_parser (2.10.0)
     representable (3.2.0)
