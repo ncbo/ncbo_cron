@@ -9,7 +9,7 @@ Gem::Specification.new do |gem|
   gem.homepage      = "https://github.com/ncbo/ncbo_cron"
 
   gem.files         = Dir['**/*']
-  # gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
+  # gem.executables = Dir.glob('bin/*').select { |f| File.file?(f) }.map { |f| File.basename(f) }
   gem.test_files    = gem.files.grep(%r{^(test|spec|features)/})
   gem.name          = "ncbo_cron"
   gem.require_paths = ["lib"]
