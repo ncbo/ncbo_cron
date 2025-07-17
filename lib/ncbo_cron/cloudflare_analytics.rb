@@ -11,18 +11,42 @@ module NcboCron
         start_time = Time.now
         @logger.info "CloudflareAnalytics started at #{start_time.utc.iso8601}"
 
-        json_data = load_existing_data
+        result_data = {
+          start_time: start_time,
+          end_time: nil,
+          duration: nil,
+          status: 'success',
+          error: nil
+        }
 
-        yesterday = Date.today - 1 # logging yesterday's counts
-        start_iso, end_iso = generate_date_range
+        begin
+          json_data = load_existing_data
 
-        process_ontologies(json_data, start_iso, end_iso, yesterday.year.to_s, yesterday.month.to_s)
-        write_updated_data(json_data)
-        write_to_redis(json_data)
+          yesterday = Date.today - 1 # logging yesterday's counts
+          start_iso, end_iso = generate_date_range
 
-        end_time = Time.now
-        duration = (end_time - start_time).round(2)
-        @logger.info "CloudflareAnalytics completed at #{end_time.utc.iso8601} (duration: #{duration}s)"
+          process_ontologies(json_data, start_iso, end_iso, yesterday.year.to_s, yesterday.month.to_s)
+          write_updated_data(json_data)
+          write_to_redis(json_data)
+
+          end_time = Time.now
+          duration = (end_time - start_time).round(2)
+          @logger.info "CloudflareAnalytics completed at #{end_time.utc.iso8601} (duration: #{duration}s)"
+
+          result_data[:end_time] = end_time
+          result_data[:duration] = duration
+        rescue StandardError => e
+          end_time = Time.now
+          result_data[:end_time] = end_time
+          result_data[:duration] = (end_time - start_time).round(2)
+          result_data[:status] = 'error'
+          result_data[:error] = "#{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
+
+          @logger.error "CloudflareAnalytics failed at #{end_time.utc.iso8601} (duration: #{result_data[:duration]}s)"
+          @logger.error result_data[:error]
+        ensure
+          LinkedData::Utils::Notifications.cloudflare_analytics(result_data)
+        end
       end
 
       # rubocop:disable Metrics/MethodLength
@@ -37,6 +61,7 @@ module NcboCron
                   limit: 10000,
                   filter: {
                     clientRequestPath: "#{path}",
+                    clientRequestHTTPHost_in: #{cloudflare_hosts},
                     datetime_geq: "#{start_date}",
                     datetime_lt: "#{end_date}"
                   },
@@ -216,6 +241,10 @@ module NcboCron
           conn.response :raise_error
           conn.adapter Faraday.default_adapter
         end
+      end
+
+      def cloudflare_hosts
+        @cloudflare_hosts ||= NcboCron.settings.cloudflare_hostnames || ['bioportal.bioontology.org']
       end
 
       def send_graphql_request(query)
