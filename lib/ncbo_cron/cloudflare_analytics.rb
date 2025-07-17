@@ -61,6 +61,7 @@ module NcboCron
                   limit: 10000,
                   filter: {
                     clientRequestPath: "#{path}",
+                    clientRequestHTTPHost_in: #{cloudflare_hosts},
                     datetime_geq: "#{start_date}",
                     datetime_lt: "#{end_date}"
                   },
@@ -240,6 +241,10 @@ module NcboCron
           conn.response :raise_error
           conn.adapter Faraday.default_adapter
         end
+      end
+
+      def cloudflare_hosts
+        @cloudflare_hosts ||= NcboCron.settings.cloudflare_hostnames || ['bioportal.bioontology.org']
       end
 
       def send_graphql_request(query)
