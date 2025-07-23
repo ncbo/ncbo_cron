@@ -87,6 +87,32 @@ rescue StandardError => e
 end
 
 logger = setup_logger(options[:logfile], options[:log_level])
+
+logger.info('')
+logger.info('=== ENVIRONMENT DEBUG ===')
+logger.info("Ruby version: #{RUBY_VERSION}")
+logger.info("Current working directory: #{Dir.pwd}")
+logger.info("Script location: #{__FILE__}")
+logger.info("Config path: #{CONFIG_PATH}")
+logger.info("Config exists: #{File.exist?(CONFIG_PATH)}")
+logger.info("USER: #{ENV['USER'] || 'not set'}")
+logger.info("HOME: #{ENV['HOME'] || 'not set'}")
+logger.info("PATH: #{ENV['PATH'] || 'not set'}")
+logger.info("BUNDLE_GEMFILE: #{ENV['BUNDLE_GEMFILE'] || 'not set'}")
+logger.info("Current user: #{`whoami`.strip rescue 'unknown'}")
+
+# Test notification settings availability
+begin
+  logger.info("enable_notifications: #{LinkedData.settings.enable_notifications}")
+  logger.info("email_sender: #{LinkedData.settings.email_sender}")
+  logger.info("ontoportal_admin_emails: #{LinkedData.settings.ontoportal_admin_emails.inspect}")
+  logger.info("smtp_host: #{LinkedData.settings.smtp_host}")
+rescue StandardError => e
+  logger.error("Error accessing LinkedData settings: #{e.message}")
+end
+logger.info('=== END ENVIRONMENT DEBUG ===')
+logger.info('')
+
 log_destination = options[:logfile] == $stdout ? 'STDOUT' : options[:logfile]
 logger.info("OBO Foundry sync starting - logging to #{log_destination}")
 logger.info("Platform: #{platform}")
