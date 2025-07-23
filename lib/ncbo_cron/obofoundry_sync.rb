@@ -37,7 +37,13 @@ module NcboCron
           obsolete_onts << ont
         end
 
-        LinkedData::Utils::Notifications.obofoundry_sync(missing_onts, obsolete_onts)
+        begin
+          LinkedData::Utils::Notifications.obofoundry_sync(missing_onts, obsolete_onts)
+        rescue StandardError => e
+          @logger.error("Notification failed: #{e.class}: #{e.message}")
+          @logger.error("Backtrace: #{e.backtrace.first(5).join(' | ')}")
+          raise
+        end
       end
 
       def get_ids_to_acronyms_map
@@ -57,3 +63,11 @@ module NcboCron
     end
   end
 end
+
+# require 'ontologies_linked_data'
+# require 'goo'
+# require 'ncbo_annotator'
+# require 'ncbo_cron/config'
+# require_relative '../../config/config'
+#
+# NcboCron::Models::OBOFoundrySync.new.run
