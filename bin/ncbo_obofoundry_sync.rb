@@ -24,9 +24,9 @@ require_relative '../config/config'
 def detect_platform
   host = LinkedData.settings.goo_host
   case host
-  when /stage/
+  when /stage|stg/
     'stage'
-  when /prod/
+  when /prod|prd/
     'prod'
   else
     'local'
