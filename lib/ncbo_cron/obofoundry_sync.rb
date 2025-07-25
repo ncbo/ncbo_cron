@@ -5,9 +5,8 @@ require 'multi_json'
 module NcboCron
   module Models
     class OBOFoundrySync
-
       def initialize
-        @logger = Logger.new(STDOUT)
+        @logger = Logger.new($stdout)
       end
 
       def run
@@ -30,15 +29,21 @@ module NcboCron
 
         # Have any of the OBO Foundry ontologies that BioPortal hosts become obsolete?
         obsolete_onts = []
-        ids = active_onts.map{ |ont| ont['id'] }
+        ids = active_onts.map { |ont| ont['id'] }
         obsolete_ids = map.keys - ids
         obsolete_ids.each do |id|
-          ont = onts.find{ |ont| ont['id'] == id }
+          ont = onts.find { |ont| ont['id'] == id }
           @logger.info("Deprecated OBO Library ontology: #{ont['title']} (#{ont['id']})")
           obsolete_onts << ont
-        end        
+        end
 
-        LinkedData::Utils::Notifications.obofoundry_sync(missing_onts, obsolete_onts)
+        begin
+          LinkedData::Utils::Notifications.obofoundry_sync(missing_onts, obsolete_onts)
+        rescue StandardError => e
+          @logger.error("Notification failed: #{e.class}: #{e.message}")
+          @logger.error("Backtrace: #{e.backtrace.first(5).join(' | ')}")
+          raise
+        end
       end
 
       def get_ids_to_acronyms_map
@@ -58,3 +63,11 @@ module NcboCron
     end
   end
 end
+
+# require 'ontologies_linked_data'
+# require 'goo'
+# require 'ncbo_annotator'
+# require 'ncbo_cron/config'
+# require_relative '../../config/config'
+#
+# NcboCron::Models::OBOFoundrySync.new.run
