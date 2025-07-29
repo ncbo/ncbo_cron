@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 098c1e1b00a04a5b0f3c9eb335f95e12bc7e7829
+  revision: f58ffda4afab6008ad94cd99f164dae24d915cbc
   branch: master
   specs:
     ontologies_linked_data (0.0.1)
@@ -106,7 +106,7 @@ GEM
       htmlentities (~> 4.3.3)
       launchy (>= 2.1, < 4.0)
       mail (~> 2.7)
-    faraday (2.13.2)
+    faraday (2.13.4)
       faraday-net_http (>= 2.0, < 3.5)
       json
       logger
@@ -229,7 +229,7 @@ GEM
       mutex_m
     i18n (1.14.7)
       concurrent-ruby (~> 1.0)
-    json (2.13.0)
+    json (2.13.2)
     json_pure (2.8.1)
     jwt (2.10.2)
       base64
@@ -252,7 +252,7 @@ GEM
     mime-types (3.7.0)
       logger
       mime-types-data (~> 3.2025, >= 3.2025.0507)
-    mime-types-data (3.2025.0715)
+    mime-types-data (3.2025.0729)
     mini_mime (1.1.5)
     minitest (5.25.5)
     minitest-hooks (1.5.2)
@@ -266,7 +266,7 @@ GEM
       redis
     mocha (2.7.1)
       ruby2_keywords (>= 0.0.5)
-    multi_json (1.15.0)
+    multi_json (1.17.0)
     mutex_m (0.3.0)
     net-ftp (0.3.8)
       net-protocol
@@ -349,7 +349,7 @@ GEM
     ruby-progressbar (1.13.0)
     ruby-xxHash (0.4.0.2)
     ruby2_keywords (0.0.5)
-    rubyzip (2.4.1)
+    rubyzip (3.0.0)
     rufus-scheduler (2.0.24)
       tzinfo (>= 0.3.22)
     signet (0.20.0)
