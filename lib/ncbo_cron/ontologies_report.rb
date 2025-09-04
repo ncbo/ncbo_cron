@@ -131,6 +131,19 @@ module NcboCron
         end
       end
 
+      def log_file(acronym, submission_id)
+        log_file_path = ''
+
+        begin
+          ont_repo_path = Dir.open("#{LinkedData.settings.repository_folder}/#{acronym}/#{submission_id}")
+          log_file_path = Dir.glob(File.join(ont_repo_path, '*.log')).max_by {|f| File.mtime(f)}
+          log_file_path.sub!(/^#{LinkedData.settings.repository_folder}\//, '') if log_file_path
+        rescue Exception => e
+          # no log file or dir exists
+        end
+        log_file_path ||= ''
+      end
+
       private
 
       def empty_report
@@ -386,19 +399,6 @@ module NcboCron
           page_num = (good_classes.length === classes_size || !page_classes.next?) ? nil : page_num + 1
         end while !page_num.nil?
         good_classes
-      end
-
-      def log_file(acronym, submission_id)
-        log_file_path = ''
-
-        begin
-          ont_repo_path = Dir.open("#{LinkedData.settings.repository_folder}/#{acronym}/#{submission_id}")
-          log_file_path = Dir.glob(File.join(ont_repo_path, '*.log')).max_by {|f| File.mtime(f)}
-          log_file_path.sub!(/^#{LinkedData.settings.repository_folder}\//, '') if log_file_path
-        rescue Exception => e
-          # no log file or dir exists
-        end
-        log_file_path ||= ''
       end
 
       def solr_escape(text)
