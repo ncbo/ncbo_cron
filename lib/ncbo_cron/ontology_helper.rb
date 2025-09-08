@@ -36,15 +36,27 @@ module NcboCron
         end
       end
 
-      def self.do_ontology_pull(ontology_acronym, enable_pull_umls = false, umls_download_url = '', logger = nil,
-                                add_to_queue = true)
+      class NoSubmissionException < StandardError
+        attr_reader :acronym
+
+        def initialize(acronym)
+          @acronym = acronym
+          super("NoSubmissionEception: No submission found for ontology #{acronym}")
+        end
+      end
+
+      def self.do_ontology_pull(ontology_acronym,
+                                enable_pull_umls: false,
+                                umls_download_url: '',
+                                logger: nil,
+                                add_to_queue: true)
         logger ||= Logger.new($stdout)
         ont = LinkedData::Models::Ontology.find(ontology_acronym).include(:acronym).first
         new_submission = nil
         raise StandardError, "Ontology #{ontology_acronym} not found" if ont.nil?
 
         last = ont.latest_submission(status: :any)
-        raise StandardError, "No submission found for #{ontology_acronym}" if last.nil?
+        raise NoSubmissionException.new(ontology_acronym) if last.nil?
 
         last.bring(:hasOntologyLanguage) if last.bring?(:hasOntologyLanguage)
         if !enable_pull_umls && last.hasOntologyLanguage.umls?
