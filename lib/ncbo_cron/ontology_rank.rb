@@ -157,7 +157,10 @@ module NcboCron
         bp_all_visits.each do |acronym, visits|
           period_visits[acronym] = 0
           periods.each do |p|
-            period_visits[acronym] += visits[p[0]] ? visits[p[0]][p[1]] || 0 : 0
+            year_str = p[0].to_s
+            month_str = p[1].to_s
+            month_visits = visits[year_str] ? visits[year_str][month_str] || 0 : 0
+            period_visits[acronym] += month_visits
           end
         end
         period_visits
