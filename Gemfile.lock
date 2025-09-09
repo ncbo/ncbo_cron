@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 87a21a76bc61392d0629a19c8a18593f606b52e5
+  revision: ca5f9d858eef89923903236fe6f76c78271e538d
   branch: develop
   specs:
     goo (0.0.2)
@@ -27,7 +27,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 4e58bcebfe54789959f072663a668fca1a1b2039
+  revision: 9cae83def8a2a4a9bd1a3a1e8388c595c339ce72
   branch: develop
   specs:
     ontologies_linked_data (0.0.1)
@@ -355,7 +355,7 @@ GEM
     ruby-progressbar (1.13.0)
     ruby-xxHash (0.4.0.2)
     ruby2_keywords (0.0.5)
-    rubyzip (3.0.2)
+    rubyzip (3.1.0)
     rufus-scheduler (2.0.24)
       tzinfo (>= 0.3.22)
     signet (0.21.0)
@@ -440,4 +440,4 @@ DEPENDENCIES
   webrick
 
 BUNDLED WITH
-   2.6.9
+   2.6.3
