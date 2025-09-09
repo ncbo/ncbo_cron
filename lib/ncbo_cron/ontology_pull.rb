@@ -12,7 +12,6 @@ module NcboCron
         logger.flush
         ontologies = LinkedData::Models::Ontology.where.include(:acronym).all
         ont_to_include = []
-        # ont_to_include = ["GVP"]
         ontologies.select! { |ont| ont_to_include.include?(ont.acronym) } unless ont_to_include.empty?
         enable_pull_umls = options[:enable_pull_umls]
         umls_download_url = options[:pull_umls_url]
@@ -20,28 +19,27 @@ module NcboCron
         new_submissions = []
 
         ontologies.each do |ont|
+          sub = NcboCron::Helpers::OntologyHelper.do_ontology_pull(
+            ont.acronym,
+            enable_pull_umls: enable_pull_umls,
+            umls_download_url: umls_download_url,
+            logger: logger,
+            add_to_queue: true
+          )
+          new_submissions << sub if sub
+        rescue NcboCron::Helpers::OntologyHelper::RemoteFileException => e
+          logger.warn(e.message)
           begin
-            new_submissions << NcboCron::Helpers::OntologyHelper.do_ontology_pull(
-              ont.acronym,
-              enable_pull_umls: enable_pull_umls,
-              umls_download_url: umls_download_url,
-              logger: logger,
-              add_to_queue: true
-            )
-          rescue NcboCron::Helpers::OntologyHelper::RemoteFileException => e
-            logger.warn(e.message)
-            # logger.warn("RemoteFileException: No submission file at pull location #{e.submission.pullLocation} for ontology #{ont.acronym}.")
-            logger.flush
             LinkedData::Utils::Notifications.remote_ontology_pull(e.submission)
-          rescue NcboCron::Helpers::OntologyHelper::MissingPullLocationException => e
-            logger.warn("Skipping #{e.acronym}: no pullLocation defined.")
-            logger.flush
-          rescue StandardError => e
-            logger.error("Unexpected error during pull of #{ont.acronym}: #{e.class} - #{e.message}")
-            logger.flush
-            # Optional: you can uncomment this for local debugging
-            # logger.debug(e.backtrace.join("\n\t"))
+          rescue StandardError => notify_err
+            logger.error("Notification failed: #{notify_err.class} - #{notify_err.message}")
           end
+        rescue NcboCron::Helpers::OntologyHelper::MissingPullLocationException => e
+          logger.warn("Skipping #{e.acronym}: no pullLocation defined.")
+        rescue NcboCron::Helpers::OntologyHelper::NoSubmissionException => e
+          logger.warn("Skipping #{e.acronym}: no submission found.")
+        rescue StandardError => e
+          logger.error("Unexpected error during pull of #{ont.acronym}: #{e.class} - #{e.message}")
         end
         if options[:cache_clear] == true
           logger.info('Clearing Goo/HTTP caches...')
