@@ -33,8 +33,8 @@ module NcboCron
           # processing the remaining actions on the new submission
           if actions.key?(:remote_pull) && actions[:remote_pull]
             acronym = NcboCron::Helpers::OntologyHelper.acronym_from_submission_id(realKey)
-            new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym, enable_pull_umls: false,
-                                                                                umls_download_url: '', logger: logger,
+            new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym,
+                                                                                logger: logger,
                                                                                 add_to_queue: false)
             return unless new_submission
             realKey = new_submission.id.to_s

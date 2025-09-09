@@ -3,26 +3,19 @@ require_relative 'ontology_helper'
 
 module NcboCron
   module Models
-
     class OntologyPull
-
       def do_remote_ontology_pull(options = {})
         logger = options[:logger] || Logger.new($stdout)
-        logger.info "UMLS auto-pull #{options[:enable_pull_umls] == true}"
         logger.flush
         ontologies = LinkedData::Models::Ontology.where.include(:acronym).all
         ont_to_include = []
         ontologies.select! { |ont| ont_to_include.include?(ont.acronym) } unless ont_to_include.empty?
-        enable_pull_umls = options[:enable_pull_umls]
-        umls_download_url = options[:pull_umls_url]
         ontologies.sort! { |a, b| a.acronym.downcase <=> b.acronym.downcase }
         new_submissions = []
 
         ontologies.each do |ont|
           sub = NcboCron::Helpers::OntologyHelper.do_ontology_pull(
             ont.acronym,
-            enable_pull_umls: enable_pull_umls,
-            umls_download_url: umls_download_url,
             logger: logger,
             add_to_queue: true
           )

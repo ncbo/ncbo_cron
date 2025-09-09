@@ -44,9 +44,6 @@ module NcboCron
     # enable mgrep dictionary generation job
     @settings.enable_dictionary_generation_cron_job ||= false
 
-    # UMLS auto-pull
-    @settings.pull_umls_url ||= ""
-    @settings.enable_pull_umls ||= false
     @settings.enable_obofoundry_sync ||= true
 
     # Schedulues
