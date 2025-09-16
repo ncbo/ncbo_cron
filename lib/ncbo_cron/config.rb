@@ -33,6 +33,8 @@ module NcboCron
     @settings.enable_ontology_analytics ||= true
     # enable ontology analytics (cloudflare)
     @settings.enable_cloudflare_analytics ||= true
+    # enable ontology rank generation
+    @settings.enable_ontology_rank ||= true
     # enable ontologies report
     @settings.enable_ontologies_report ||= true
     # enable index synchronization
@@ -66,6 +68,9 @@ module NcboCron
     # Cloudflare analytics schedule
     # 0 1 * * * - run daily at 1:00am
     @settings.cron_cloudflare_analytics ||= '0 1 * * *'
+    # Ontology rank generation schedule
+    # 0 4 * * 1 - run once a week on Monday at 4:00AM
+    @settings.cron_ontology_rank ||= '0 4 * * 1'
     # Ontologies report generation schedule
     # 30 1 * * * - run daily at 1:30AM
     @settings.cron_ontologies_report ||= "30 1 * * *"

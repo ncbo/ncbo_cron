@@ -103,6 +103,9 @@ opt_parser = OptionParser.new do |opts|
   opts.on("--disable-cloudflare-analytics", "disable Cloudflare analytics job", "(default: #{options[:enable_cloudflare_analytics]})") do |v|
     options[:enable_cloudflare_analytics] = false
   end
+  opts.on("--disable-ontology-rank", "disable ontology rank generation", "(default: #{options[:enable_ontology_rank]})") do |v|
+    options[:enable_ontology_rank] = false
+  end
   opts.on("--disable-ontologies-report", "disable ontologies report generation", "(default: #{options[:enable_ontologies_report]})") do |v|
     options[:enable_ontologies_report] = false
   end
@@ -141,6 +144,9 @@ opt_parser = OptionParser.new do |opts|
   end
   opts.on("--ontology-analytics SCHED", String, "cron schedule to run ontology analytics refresh", "(default: #{options[:cron_ontology_analytics]})") do |c|
     options[:cron_ontology_analytics] = c
+  end
+  opts.on("--ontology-rank SCHED", String, "cron schedule to generate ontology rankings", "(default: #{options[:cron_ontology_rank]})") do |c|
+    options[:cron_ontology_rank] = c
   end
   opts.on("--ontologies-report SCHED", String, "cron schedule to run ontologies report generation", "(default: #{options[:cron_ontologies_report]})") do |c|
     options[:cron_ontologies_report] = c
@@ -377,8 +383,6 @@ runner.execute do |opts|
         t0 = Time.now
         # Generate ontology analytics
         NcboCron::Models::OntologyAnalytics.new(ontology_analytics_logger).run
-        # Generate ontology ranking
-        NcboCron::Models::OntologyRank.new(ontology_analytics_logger).run
         logger.info "Ontology analytics refresh job completed in #{Time.now - t0} sec."; logger.flush
         logger.info "Finished ontology analytics refresh"; logger.flush
       end
@@ -401,6 +405,26 @@ runner.execute do |opts|
         NcboCron::Models::CloudflareAnalytics.new(cloudflare_analytics_logger).run
         logger.info "Cloudflare analytics job completed in #{Time.now - t0} sec."; logger.flush
         logger.info 'Finished Cloudflare analytics job'; logger.flush
+      end
+    end
+  end
+
+  if options[:enable_ontology_rank]
+    ontology_rank_thread = Thread.new do
+      ontology_rank_options = options.dup
+      ontology_rank_options[:job_name] = "ncbo_cron_ontology_rank"
+      ontology_rank_options[:scheduler_type] = :cron
+      ontology_rank_options[:cron_schedule] = ontology_rank_options[:cron_ontology_rank]
+      logger.info "Setting up ontology rank generation job with #{ontology_rank_options[:cron_ontology_rank]}"; logger.flush
+      ontology_rank_log_path = File.join(log_path, "#{log_filename_noExt}-ontology-rank.log")
+      ontology_rank_logger = Logger.new(ontology_rank_log_path)
+      NcboCron::Scheduler.scheduled_locking_job(ontology_rank_options) do
+        logger.info "Starting ontology rank generation job"; logger.flush
+        logger.info "Logging ontology rank generation details to #{ontology_rank_log_path}"; logger.flush
+        t0 = Time.now
+        NcboCron::Models::OntologyRank.new(ontology_rank_logger).run
+        logger.info "Ontology rank generation job completed in #{Time.now - t0} sec."; logger.flush
+        logger.info "Finished ontology rank generation job"; logger.flush
       end
     end
   end
@@ -542,6 +566,7 @@ runner.execute do |opts|
   warmq_thread.join if warmq_thread
   analytics_thread.join if analytics_thread
   cloudflare_analytics_thread.join if cloudflare_analytics_thread
+  ontology_rank_thread.join if ontology_rank_thread
   ontologies_report_thread.join if ontologies_report_thread
   index_synchronizer_thread.join if index_synchronizer_thread
   spam_deletion_thread.join if spam_deletion_thread
