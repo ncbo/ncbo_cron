@@ -46,8 +46,6 @@ module NcboCron
       end
 
       def self.do_ontology_pull(ontology_acronym,
-                                enable_pull_umls: false,
-                                umls_download_url: '',
                                 logger: nil,
                                 add_to_queue: true)
         logger ||= Logger.new($stdout)
@@ -59,20 +57,11 @@ module NcboCron
         raise NoSubmissionException.new(ontology_acronym) if last.nil?
 
         last.bring(:hasOntologyLanguage) if last.bring?(:hasOntologyLanguage)
-        if !enable_pull_umls && last.hasOntologyLanguage.umls?
-          raise StandardError, "Pull umls not enabled"
-        end
 
         last.bring(:pullLocation) if last.bring?(:pullLocation)
         raise MissingPullLocationException.new(ontology_acronym) if last.pullLocation.nil?
 
         last.bring(:uploadFilePath) if last.bring?(:uploadFilePath)
-
-        if last.hasOntologyLanguage.umls? && umls_download_url && !umls_download_url.empty?
-          last.pullLocation = RDF::URI.new(umls_download_url + last.pullLocation.split("/")[-1])
-          logger.info("Using alternative download for umls #{last.pullLocation.to_s}")
-          logger.flush
-        end
 
         raise self::RemoteFileException.new(last) unless last.remote_file_exists?(last.pullLocation.to_s)
         logger.info "Checking download for #{ont.acronym}"
