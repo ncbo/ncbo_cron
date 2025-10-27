@@ -1,7 +1,5 @@
 #!/usr/bin/env ruby
 
-$0 = "ncbo_ontology_pull"
-
 # Exit cleanly from an early interrupt
 Signal.trap("INT") { exit 1 }
 
