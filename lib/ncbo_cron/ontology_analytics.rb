@@ -155,7 +155,7 @@ module NcboCron
       def merge_and_fill_missing_data(ga4_data)
         ua_data = {}
 
-        if File.exists?(NcboCron.settings.analytics_path_to_ua_data_file) &&
+        if File.exist?(NcboCron.settings.analytics_path_to_ua_data_file) &&
             !File.zero?(NcboCron.settings.analytics_path_to_ua_data_file)
           @logger.info "Merging GA4 and UA data..."
           @logger.flush
