@@ -6,6 +6,7 @@ module NcboCron
 
   @settings = OpenStruct.new
   @settings_run = false
+
   def config(&block)
     return if @settings_run
 

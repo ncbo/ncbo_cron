@@ -2,6 +2,7 @@ require 'logger'
 
 # Scheduling/lock gems
 require 'redis-lock'
+require 'active_support/isolated_execution_state'
 require 'rufus/scheduler'
 
 module NcboCron
@@ -44,7 +45,7 @@ module NcboCron
       end
 
       redis = Redis.new(host: redis_host, port: redis_port)
-      scheduler = Rufus::Scheduler.start_new(:thread_name => job_name)
+      scheduler = Rufus::Scheduler.new(thread_name: job_name)
 
       scheduler.send(scheduler_type, interval, {:allow_overlapping => false}) do
         redis.lock(job_name, life: lock_life, owner: "ncbo_cron") do

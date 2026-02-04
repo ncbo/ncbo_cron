@@ -1,4 +1,4 @@
-# Start simplecov if this is a coverage task or if it is run in the CI pipeline
+ # Start simplecov if this is a coverage task or if it is run in the CI pipeline
 if ENV['COVERAGE'] == 'true' || ENV['CI'] == 'true'
   require 'simplecov'
   require 'simplecov-cobertura'
@@ -19,7 +19,10 @@ require 'minitest/autorun'
 require 'minitest/hooks/test'
 require 'mocha/minitest'
 require 'webmock/minitest'
-require 'ontologies_linked_data'
+
+WebMock.allow_net_connect!
+Minitest.after_run { WebMock.reset! }
+
 require_relative '../lib/ncbo_cron'
 require_relative '../config/config'
 
@@ -54,13 +57,7 @@ class TestCase < Minitest::Test
 
   def before_all
     super
-    WebMock.allow_net_connect!
     backend_triplestore_delete
-  end
-
-  def after_all
-    super
-    WebMock.reset!
   end
 
   # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
@@ -87,15 +84,19 @@ class TestCase < Minitest::Test
       count_pattern('?s ?p ?o') < 400000
 
     LinkedData::Models::Ontology.where.include(:acronym).each do |o|
-      query = "submissionAcronym:#{o.acronym}"
-      LinkedData::Models::Ontology.unindexByQuery(query)
+      o.unindex_all_data
     end
-    LinkedData::Models::Ontology.indexCommit
-    Goo.sparql_update_client.update('DELETE {?s ?p ?o } WHERE { ?s ?p ?o }')
+
+    graphs = Goo.sparql_query_client.query("SELECT DISTINCT  ?g WHERE  { GRAPH ?g { ?s ?p ?o . } }")
+    graphs.each_solution do |sol|
+      Goo.sparql_data_client.delete_graph(sol[:g])
+    end
+
     LinkedData::Models::SubmissionStatus.init_enum
     LinkedData::Models::OntologyFormat.init_enum
     LinkedData::Models::OntologyType.init_enum
     LinkedData::Models::Users::Role.init_enum
     LinkedData::Models::Users::NotificationType.init_enum
   end
+
 end
