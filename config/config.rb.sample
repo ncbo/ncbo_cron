@@ -49,7 +49,7 @@ LinkedData.config do |config|
 end
 
 Annotator.config do |config|
-  config.mgrep_host              ||= "localhost"
+  config.mgrep_host            = "localhost"
   config.annotator_redis_host  = REDIS_PERSISTENT_HOST.to_s
   config.annotator_redis_port  = REDIS_PORT.to_i
   config.mgrep_host            = MGREP_HOST.to_s
