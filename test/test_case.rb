@@ -87,7 +87,7 @@ class TestCase < Minitest::Test
       o.unindex_all_data
     end
 
-    graphs = Goo.sparql_query_client.query("SELECT DISTINCT  ?g WHERE  { GRAPH ?g { ?s ?p ?o . } }")
+    graphs = Goo.sparql_query_client.query("SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o . } }")
     graphs.each_solution do |sol|
       Goo.sparql_data_client.delete_graph(sol[:g])
     end
