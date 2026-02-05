@@ -57,7 +57,6 @@ class TestScheduler < TestCase
   end
 
   def test_scheduler_locking
-    skip 'Skip: issues only on Apple Silicon + AllegroGraph in local dev.'
     begin
       options = {
         job_name: 'test_scheduled_job_locking',
