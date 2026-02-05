@@ -9,6 +9,8 @@ module NcboCron
       PROCESS_ACTIONS = {
         :process_rdf => true,
         :generate_labels => true,
+        :extract_metadata => true,
+        :index_all_data => true,
         :index_search => true,
         :index_properties => true,
         :run_metrics => true,
