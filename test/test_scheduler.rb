@@ -1,13 +1,15 @@
 require_relative 'test_case'
 # require_relative '../lib/ncbo_cron'
+require 'securerandom'
 
 class TestScheduler < TestCase
   def test_scheduler
     begin
       logger = Logger.new($stdout)
       logger.level = Logger::ERROR
+      job_name = "test_scheduled_job_locking_#{Process.pid}_#{SecureRandom.hex(4)}"
       options = {
-        job_name: 'test_scheduled_job',
+        job_name: job_name,
         seconds_between: 1,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port,
@@ -58,8 +60,9 @@ class TestScheduler < TestCase
 
   def test_scheduler_locking
     begin
+      job_name = "test_scheduled_job_locking_#{Process.pid}_#{SecureRandom.hex(4)}"
       options = {
-        job_name: 'test_scheduled_job_locking',
+        job_name: job_name,
         seconds_between: 5,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port
