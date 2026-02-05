@@ -35,7 +35,8 @@ module NcboCron
 
       if scheduler_type == :every
         # Minutes/seconds string prep
-        interval = "#{seconds_between*1000}" if seconds_between
+        # Rufus expects explicit units; defaulting to seconds keeps intent clear.
+        interval = "#{seconds_between}s" if seconds_between
         interval = "#{minutes_between}m" if minutes_between
         interval = "5m" unless interval
       end
