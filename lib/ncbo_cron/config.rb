@@ -6,9 +6,9 @@ module NcboCron
 
   @settings = OpenStruct.new
   @settings_run = false
-
   def config(&block)
     return if @settings_run
+    @settings_run = true
 
     # Redis is used for two separate things in ncbo_cron:
     # 1) locating the queue for the submissions to be processed and
@@ -28,6 +28,8 @@ module NcboCron
     @settings.enable_processing ||= true
     @settings.enable_pull ||= true
     @settings.enable_flush ||= true
+    # Don't remove graphs from deleted ontologies by default when flushing classes
+    @settings.remove_zombie_graphs ||= false
     @settings.enable_warmq ||= true
     @settings.enable_mapping_counts ||= true
     # enable ontology analytics (GA4)
@@ -36,6 +38,8 @@ module NcboCron
     @settings.enable_cloudflare_analytics ||= true
     # enable ontology rank generation
     @settings.enable_ontology_rank ||= true
+    # enable graph count
+    @settings.enable_graphs_counts ||= true
     # enable ontologies report
     @settings.enable_ontologies_report ||= true
     # enable index synchronization
@@ -49,13 +53,16 @@ module NcboCron
 
     @settings.enable_obofoundry_sync ||= true
 
-    # Schedulues
+    # Schedules
+    # 30 */4 * * * - run every 4 hours, starting at 00:30
     @settings.cron_schedule ||= "30 */4 * * *"
-    # Pull schedule
+    # Pull schedule.
+    # 00 18 * * * - run daily at 6 a.m. (18:00)
     @settings.pull_schedule ||= "00 18 * * *"
     # Delete class graphs of archive submissions
     @settings.cron_flush ||= "00 22 * * 2"
-    # Warmup long time running queries
+    # Warmup long time running queries.
+    # 00 */3 * * * - run every 3 hours (beginning at 00:00)
     @settings.cron_warmq ||= "00 */3 * * *"
     # Create mapping counts schedule
     # 30 0 * * 6 - run once per week on Saturday at 12:30AM
@@ -73,7 +80,11 @@ module NcboCron
     # 30 1 * * * - run daily at 1:30AM
     @settings.cron_ontologies_report ||= "30 1 * * *"
     # Ontologies Report file location
-    @settings.ontology_report_path = "../../reports/ontologies_report.json"
+    @settings.ontology_report_path ||= "../../reports/ontologies_report.json"
+
+    # Ontologies Report file location
+    @settings.graph_counts_report_path = "../../reports/graph_counts.json"
+
     # Index synchronizer schedule
     # 30 3 */2 * * - run every 2 days at 3:30AM
     @settings.cron_index_synchronizer ||= "30 3 */2 * *"
@@ -89,8 +100,17 @@ module NcboCron
     @settings.cron_dictionary_generation_cron_job ||= "30 3 * * *"
 
     @settings.log_level ||= :info
-    @settings.log_dir  ||= nil          # let caller provide it
-    @settings.log_path ||= nil          # will build it later
+    unless (@settings.log_path && File.exist?(@settings.log_path))
+      log_dir = File.expand_path("../../../logs", __FILE__)
+      FileUtils.mkdir_p(log_dir)
+      @settings.log_path = "#{log_dir}/scheduler.log"
+    end
+    if File.exist?("/var/run/ncbo_cron")
+      pid_path = File.expand_path("/var/run/ncbo_cron/ncbo_cron.pid", __FILE__)
+    else
+      pid_path = File.expand_path("../../../ncbo_cron.pid", __FILE__)
+    end
+    @settings.pid_path ||= pid_path
 
     # minutes between process queue checks (override seconds)
     @settings.minutes_between ||= 5
@@ -105,12 +125,5 @@ module NcboCron
 
     # Override defaults
     yield @settings if block_given?
-
-    # ── choose defaults *after* user input ───────────────────────────────
-    @settings.log_dir  ||= File.expand_path("log", Dir.pwd)
-    @settings.log_path ||= File.join(@settings.log_dir, "scheduler.log")
-    @settings.pid_path ||= File.expand_path("ncbo_cron.pid", Dir.pwd)
-
-    @settings_run = true
   end
 end
