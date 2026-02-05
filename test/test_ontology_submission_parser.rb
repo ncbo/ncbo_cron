@@ -4,6 +4,11 @@ require 'multi_json'
 require 'redis'
 
 class TestOntologySubmissionParser < TestCase
+  def setup
+    super
+    @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
+  end
+
   def before_all
     super
     @@redis = Redis.new(host: NcboCron.settings.redis_host, port: NcboCron.settings.redis_port)
