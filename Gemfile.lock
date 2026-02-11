@@ -257,6 +257,15 @@ GEM
       concurrent-ruby (~> 1.0)
     io-console (0.8.2)
     json (2.18.1)
+    json-canonicalization (1.0.0)
+    json-ld (3.3.2)
+      htmlentities (~> 4.3)
+      json-canonicalization (~> 1.0)
+      link_header (~> 0.0, >= 0.0.8)
+      multi_json (~> 1.15)
+      rack (>= 2.2, < 4)
+      rdf (~> 3.3)
+      rexml (~> 3.2)
     jwt (3.1.2)
       base64
     language_server-protocol (3.17.0.5)
@@ -463,6 +472,7 @@ DEPENDENCIES
   goo!
   google-analytics-data
   google-apis-analytics_v3
+  json-ld
   minitest
   minitest-hooks
   minitest-reporters
