@@ -94,9 +94,6 @@ opt_parser = OptionParser.new do |opts|
   opts.on("--disable-mapping-counts", "disable mapping counts creation") do |v|
     options[:enable_mapping_counts] = false
   end
-  opts.on("--enable-umls", "enable UMLS auto-pull") do |v|
-    options[:enable_pull_umls] = true
-  end
   opts.on("--disable-ontology-analytics", "disable ontology analytics refresh", "(default: #{options[:enable_ontology_analytics]})") do |v|
     options[:enable_ontology_analytics] = false
   end
@@ -123,9 +120,6 @@ opt_parser = OptionParser.new do |opts|
   end
   opts.on("--disable-obofoundry_sync", "disable OBO Foundry synchronization report", "(default: #{options[:enable_obofoundry_sync]})") do |v|
     options[:enable_obofoundry_sync] = false
-  end
-  opts.on("--pull-umls-url URL", "set UMLS pull location") do |v|
-    options[:pull_umls_url] = v
   end
   opts.on("-c", "--pull-cron SCHED", String, "cron schedule for ontology pull", "(default: #{options[:pull_schedule]})") do |c|
     options[:pull_schedule] = c
@@ -295,7 +289,6 @@ runner.execute do |opts|
         logger.info "Logging pull details to #{pull_log_path}"; logger.flush
         puller = NcboCron::Models::OntologyPull.new
         pulled_onts = puller.do_remote_ontology_pull(logger: pull_logger,
-                                                     enable_pull_umls: options[:enable_pull_umls],
                                                      cache_clear: true)
         logger.info "Finished ncbo pull"; logger.flush
         logger.info "Pull summary:\n#{pulled_onts.map {|o| o.id.to_s}}"
