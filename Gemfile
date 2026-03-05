@@ -24,9 +24,6 @@ gem 'redis'
 gem 'rest-client'
 gem 'sys-proctable'
 
-# Monitoring
-gem 'cube-ruby', require: 'cube'
-
 # NCBO
 gem 'goo', github: 'ncbo/goo', branch: 'ontoportal-lirmm-development'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'chore/ruby3.2-minitest6-compat'
