@@ -32,11 +32,7 @@ unless ENV['RM_INFO']
 end
 
 Goo.use_cache = false # Make sure tests don't cache
-puts "LinkedData.settings.goo_host: #{LinkedData.settings.goo_host}"
-puts "LinkedData.settings.search_server_url: #{LinkedData.settings.search_server_url}"
-puts "NcboCron.settings.redis_host: #{NcboCron.settings.redis_host}"
 # Check to make sure you want to run if not pointed at localhost
-# safe_host = Regexp.new(/localhost|-ut/)
 safe_host = Regexp.new(/localhost|-ut/)
 unless LinkedData.settings.goo_host.match(safe_host) &&
        LinkedData.settings.search_server_url.match(safe_host) &&
