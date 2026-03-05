@@ -43,6 +43,7 @@ group :test do
   gem 'minitest-hooks'
   gem 'minitest-reporters'
   gem 'mocha', '~> 2.7'
+  gem 'ontoportal_testkit', github: 'alexskr/ontoportal_testkit', branch: 'main'
   gem 'simplecov'
   gem 'simplecov-cobertura' # for codecov.io
   gem 'webmock', '~> 3.25'

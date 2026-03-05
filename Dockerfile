@@ -1,25 +1,20 @@
-ARG RUBY_VERSION=3.1
-ARG DISTRO_NAME=bullseye
+ARG RUBY_VERSION=3.2
+ARG DISTRO=bullseye
+ARG TESTKIT_BASE_IMAGE=ontoportal/testkit-base:ruby${RUBY_VERSION}-${DISTRO}
+FROM ${TESTKIT_BASE_IMAGE}
 
-FROM ruby:$RUBY_VERSION-$DISTRO_NAME
+WORKDIR /app
 
-RUN apt-get update -yqq && apt-get install -yqq --no-install-recommends \
-  openjdk-11-jre-headless \
-  raptor2-utils \
-  && rm -rf /var/lib/apt/lists/*
+COPY Gemfile* *.gemspec ./
 
-RUN mkdir -p /srv/ontoportal/ncbo_cron
-RUN mkdir -p /srv/ontoportal/bundle
-COPY Gemfile* *.gemspec /srv/ontoportal/ncbo_cron/
+# Respect the project's Bundler lock when present.
+RUN if [ -f Gemfile.lock ]; then \
+      BUNDLER_VERSION=$(grep -A 1 "BUNDLED WITH" Gemfile.lock | tail -n 1 | tr -d ' '); \
+      gem install bundler -v "$BUNDLER_VERSION"; \
+    fi
 
-WORKDIR /srv/ontoportal/ncbo_cron
+RUN bundle install --jobs 4 --retry 3
 
-RUN gem update --system
-RUN gem install bundler
-ENV BUNDLE_PATH=/srv/ontoportal/bundle
-RUN bundle install
+COPY . ./
 
-COPY . /srv/ontoportal/ncbo_cron
-RUN cp /srv/ontoportal/ncbo_cron/config/config.rb.sample /srv/ontoportal/ncbo_cron/config/config.rb
-
-CMD ["/bin/bash"]
+CMD ["bundle", "exec", "rake"]

@@ -1,6 +1,14 @@
 GIT
+  remote: https://github.com/alexskr/ontoportal_testkit.git
+  revision: 741b25d35ed3e3bdbdcbc55f4672a5258215ecdb
+  branch: main
+  specs:
+    ontoportal_testkit (0.1.0)
+      rake (>= 13.0)
+
+GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 13a8559a2346cc8320d7d36046646907bfa8a27c
+  revision: f803bb2784cc052032b8c55d4b9b43b5548532e8
   branch: ontoportal-lirmm-development
   specs:
     goo (0.0.2)
@@ -90,7 +98,7 @@ GEM
       securerandom (>= 0.3)
       tzinfo (~> 2.0, >= 2.0.5)
       uri (>= 0.13.1)
-    addressable (2.8.8)
+    addressable (2.8.9)
       public_suffix (>= 2.0.2, < 8.0)
     ansi (1.5.0)
     ast (2.4.3)
@@ -289,7 +297,7 @@ GEM
     mime-types (3.7.0)
       logger
       mime-types-data (~> 3.2025, >= 3.2025.0507)
-    mime-types-data (3.2026.0203)
+    mime-types-data (3.2026.0303)
     mini_mime (1.1.5)
     minitest (6.0.1)
       prism (~> 1.5)
@@ -341,7 +349,7 @@ GEM
       coderay (~> 1.1)
       method_source (~> 1.0)
       reline (>= 0.6.0)
-    public_suffix (7.0.2)
+    public_suffix (7.0.5)
     raabro (1.4.0)
     racc (1.8.1)
     rack (3.2.4)
@@ -482,6 +490,7 @@ DEPENDENCIES
   ncbo_cron!
   oj (~> 3.0)
   ontologies_linked_data!
+  ontoportal_testkit!
   parallel
   parseconfig
   pony
