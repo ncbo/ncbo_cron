@@ -24,9 +24,6 @@ gem 'redis'
 gem 'rest-client'
 gem 'sys-proctable'
 
-# Monitoring
-gem 'cube-ruby', require: 'cube'
-
 # NCBO
 gem 'goo', github: 'ncbo/goo', branch: 'ontoportal-lirmm-development'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'chore/ruby3.2-minitest6-compat'
@@ -43,8 +40,8 @@ group :test do
   gem 'minitest-hooks'
   gem 'minitest-reporters'
   gem 'mocha', '~> 2.7'
+  gem 'ontoportal_testkit', github: 'alexskr/ontoportal_testkit', branch: 'main'
   gem 'simplecov'
   gem 'simplecov-cobertura' # for codecov.io
   gem 'webmock', '~> 3.25'
-  gem 'webrick'
 end

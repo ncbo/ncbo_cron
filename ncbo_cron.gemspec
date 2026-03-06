@@ -35,5 +35,4 @@ Gem::Specification.new do |gem|
   gem.add_development_dependency "mocha", "~> 2.7"
   gem.add_development_dependency "simplecov-cobertura"
   gem.add_development_dependency "webmock", "~> 3.25"
-  gem.add_development_dependency "webrick"
 end
