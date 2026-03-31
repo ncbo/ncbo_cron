@@ -66,8 +66,10 @@ NcboCron.config do |config|
   # do not deaemonize in docker
   config.daemonize  = false
 
-  config.search_index_all_url = "http://localhost:8983/solr"
-  config.property_search_index_all_url = "http://localhost:8983/solr"
+  # Full reindex jobs now use the LinkedData search_server_url base URL above
+  # and select the physical target collection via the cron CLI, for example:
+  #   ./bin/ncbo_ontology_index -a -c term_search_core2
+  #   ./bin/ncbo_ontology_index -a -c term_search_core2 -p
 
   # Sample configuration for Cloudflare Analytics integration
   # Cloudflare Zone Tag (unique identifier for your Cloudflare zone)

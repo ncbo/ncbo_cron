@@ -50,6 +50,14 @@ opt_parser = OptionParser.new do |opts|
     options[:optimize] = optimize
   end
 
+  opts.on('-p', '--promote-active-alias', 'Promote the active property search alias to the target collection after a successful rebuild.') do
+    options[:promote_active_alias] = true
+  end
+
+  opts.on('--promote-only', 'Promote the active property search alias to the target collection without rebuilding.') do
+    options[:promote_only] = true
+  end
+
   options[:logfile] = STDOUT
   opts.on( '-l', '--logfile FILE', "Write log to FILE (default is STDOUT)" ) do |filename|
     options[:logfile] = filename
@@ -65,7 +73,7 @@ end
 # Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
 # any options found there, as well as any parameters for the options.
 opt_parser.parse!
-unless options[:ontologies]
+if !options[:promote_only] && options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
 end
@@ -116,16 +124,23 @@ def extract_solr_collection(target)
   path_segments.last
 end
 
-options[:solr_collection] = extract_solr_collection(options[:solr_collection]) || Goo.search_collection_target(:property_search_active).to_s
+active_alias_name = Goo.search_collection_target(:property_search_active).to_s
+options[:solr_collection] = extract_solr_collection(options[:solr_collection]) || active_alias_name
 abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
+abort("The --promote-only option cannot be combined with -a/--all-ontologies or -o/--ontologies.\n\n") if options[:promote_only] && (options[:all] || options[:ontologies].any?)
+abort("Promoting the active alias is only supported with -a/--all-ontologies.\n\n") if options[:promote_active_alias] && !options[:all]
+abort("The --promote-only option requires -c/--solr-collection.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_active_alias] && options[:solr_collection].downcase == active_alias_name.downcase
 
-if options[:all] && options[:solr_collection].downcase == Goo.search_collection_target(:property_search_active).to_s.downcase
+if options[:promote_only]
+  puts "You are about to promote the active property search alias #{active_alias_name} to #{options[:solr_collection]}. Are you sure?"
+elsif options[:all] && options[:solr_collection].downcase == active_alias_name.downcase
   puts "WARNING: You are about to clear the active property search collection #{options[:solr_collection]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
 elsif options[:all]
   puts "You are about to clear the property search collection #{options[:solr_collection]} and kick off a full re-indexing process. Are you sure?"
 end
 
-if options[:all]
+if options[:all] || options[:promote_only]
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -137,7 +152,9 @@ begin
   puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
   msg = ""
 
-  if options[:all]
+  if options[:promote_only]
+    msg = "Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}"
+  elsif options[:all]
     msg = "Processing property index for all ontologies on #{options[:solr_collection]}"
   else
     msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
@@ -146,17 +163,30 @@ begin
   logger.info(msg)
 
   search_config = Goo.search_collection(:property_search_active)
-  Goo.set_search_collection_target(:property_search_active, options[:solr_collection].to_sym)
-  Goo.init_search_connection(:property_search_active,
-                             search_config[:search_backend],
-                             search_config[:block],
-                             force: true,
-                             target_collection: options[:solr_collection].to_sym)
+  admin_connector = SOLR::SolrConnector.new(Goo.search_conf(search_config[:search_backend]), active_alias_name)
+  abort("The target collection #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:promote_only] && !admin_connector.collection_exists?(options[:solr_collection])
+
+  unless options[:promote_only]
+    Goo.set_search_collection_target(:property_search_active, options[:solr_collection].to_sym)
+    Goo.init_search_connection(:property_search_active,
+                               search_config[:search_backend],
+                               search_config[:block],
+                               force: true,
+                               target_collection: options[:solr_collection].to_sym)
+  end
 
   indexed_ontologies = []
-  remaining_ontologies = options[:ontologies].length
+  remaining_ontologies = options[:ontologies]&.length.to_i
 
   time = Benchmark.realtime do
+    if options[:promote_only]
+      logger.info("Promoting active property search alias without rebuilding.")
+      Goo.promote_search_alias(:property_search_active, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+      logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
+      logger.flush
+      next
+    end
+
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index the properties of")
 
     if options[:all]
@@ -179,9 +209,18 @@ begin
       logger.info("Completed optimizing property index in #{Time.now - t0} sec.")
       logger.flush
     end
+
+    if options[:promote_active_alias]
+      logger.info("Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}...")
+      Goo.promote_search_alias(:property_search_active, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+      logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
+      logger.flush
+    end
   end
 
-  if options[:all]
+  if options[:promote_only]
+    msg = "Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
+  elsif options[:all]
     msg = "Completed processing property index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
     msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."

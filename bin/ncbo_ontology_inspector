@@ -272,7 +272,7 @@ end
 def get_solr_data(acronym)
   # Note: SOLR index should contain only data from one ontology submission, i.e. it should not
   #       contain data from multiple submissions of one ontology.
-  # The search_server_url contains the collection name in the URL.
+  # The search_server_url is the Solr base URL; the active collection is resolved by Goo.
   solr_select_url = "#{LinkedData.settings.search_server_url}/select"
   query = "submissionAcronym:#{acronym}"
   response = RestClient.get solr_select_url, {:params => { :q => query, :wt => "json" }}
