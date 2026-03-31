@@ -29,14 +29,12 @@ require 'optparse'
 
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  opts.on('-c', '--solr-core-url URL', 'Optional URL of the Solr core to be used for property indexing. Ex: http://localhost:8983/solr/prop_search_core1') do |url|
-    options[:solr_core_url] = url
+  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name, or legacy Solr core URL, to use for property indexing. Ex: prop_search_core2') do |target|
+    options[:solr_collection] = target
   end
 
   options[:ontologies] = []
   opts.on('-a', '--all-ontologies', 'Index all ontologies properties (this or -o option required).') do
-    options[:solr_core_url] = NcboCron.settings.property_search_index_all_url if (options[:solr_core_url].nil?)
-
     LinkedData::Models::Ontology.all.each  do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
@@ -72,7 +70,6 @@ unless options[:ontologies]
   exit(1)
 end
 
-options[:solr_core_url] = LinkedData.settings.property_search_server_url if (options[:solr_core_url].nil?)
 if options[:optimize].nil? || options[:optimize] != "false"
   options[:optimize] = true
 else
@@ -104,17 +101,28 @@ def index_ontology_properties(indexed_ontologies, acronym, logger)
   end
 end
 
-def valid_url?(url)
-  url = URI.parse(url) rescue false
-  url.kind_of?(URI::HTTP) || url.kind_of?(URI::HTTPS)
+def extract_solr_collection(target)
+  return nil if target.nil?
+
+  target = target.strip
+  return nil if target.empty?
+
+  parsed_target = URI.parse(target) rescue nil
+  return target unless parsed_target.kind_of?(URI::HTTP) || parsed_target.kind_of?(URI::HTTPS)
+
+  path_segments = parsed_target.path.to_s.split('/').reject(&:empty?)
+  return nil if path_segments.empty? || path_segments.last == 'solr'
+
+  path_segments.last
 end
 
-abort("The Solr core URL you provided is invalid. Aborting...\n\n") unless valid_url?(options[:solr_core_url])
+options[:solr_collection] = extract_solr_collection(options[:solr_collection]) || Goo.search_collection_target(:property_search_active).to_s
+abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
 
-if options[:all] && options[:solr_core_url].downcase == LinkedData.settings.property_search_server_url.downcase
-  puts "WARNING: You are about to clear the main core property search index on #{options[:solr_core_url]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
+if options[:all] && options[:solr_collection].downcase == Goo.search_collection_target(:property_search_active).to_s.downcase
+  puts "WARNING: You are about to clear the active property search collection #{options[:solr_collection]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
 elsif options[:all]
-  puts "You are about to clear the property index on #{options[:solr_core_url]} and kick off a full re-indexing process. Are you sure?"
+  puts "You are about to clear the property search collection #{options[:solr_collection]} and kick off a full re-indexing process. Are you sure?"
 end
 
 if options[:all]
@@ -130,16 +138,20 @@ begin
   msg = ""
 
   if options[:all]
-    msg = "Processing property index for all ontologies on #{options[:solr_core_url]}"
+    msg = "Processing property index for all ontologies on #{options[:solr_collection]}"
   else
-    msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_core_url]}"
+    msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
   end
   puts msg
   logger.info(msg)
 
-  Goo.configure do |conf|
-    conf.add_search_backend(:property, service: options[:solr_core_url])
-  end
+  search_config = Goo.search_collection(:property_search_active)
+  Goo.set_search_collection_target(:property_search_active, options[:solr_collection].to_sym)
+  Goo.init_search_connection(:property_search_active,
+                             search_config[:search_backend],
+                             search_config[:block],
+                             force: true,
+                             target_collection: options[:solr_collection].to_sym)
 
   indexed_ontologies = []
   remaining_ontologies = options[:ontologies].length
@@ -148,9 +160,9 @@ begin
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index the properties of")
 
     if options[:all]
-      logger.info("Clearing existing property index on #{options[:solr_core_url]}")
-      LinkedData::Models::Class.indexClear(:property)
-      LinkedData::Models::Class.indexCommit(nil, :property)
+      logger.info("Clearing existing property index on #{options[:solr_collection]}")
+      LinkedData::Models::Class.indexClear(:property_search_active)
+      LinkedData::Models::Class.indexCommit(nil, :property_search_active)
     end
 
     options[:ontologies].each do |acronym|
@@ -163,16 +175,16 @@ begin
       logger.info("Optimizing property index...")
       logger.flush
       t0 = Time.now
-      LinkedData::Models::Class.indexOptimize(nil, :property)
+      LinkedData::Models::Class.indexOptimize(nil, :property_search_active)
       logger.info("Completed optimizing property index in #{Time.now - t0} sec.")
       logger.flush
     end
   end
 
   if options[:all]
-    msg = "Completed processing property index for all ontologies on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing property index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
-    msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   end
   puts msg
   logger.info(msg)

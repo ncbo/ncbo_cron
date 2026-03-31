@@ -32,14 +32,12 @@ opt_parser = OptionParser.new do |opts|
   # Set a banner, displayed at the top of the help screen.
   #opts.banner = "Usage: ncbo_ontology_index [options]"
 
-  opts.on('-c', '--solr-core-url URL', 'Optional URL of the Solr core to be used for indexing. Ex: http://localhost:8983/solr/core1') do |url|
-    options[:solr_core_url] = url
+  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name, or legacy Solr core URL, to use for indexing. Ex: term_search_core2') do |target|
+    options[:solr_collection] = target
   end
 
   options[:ontologies] = []
   opts.on('-a', '--all-ontologies', 'Index all ontologies (this or -o option required).') do
-    options[:solr_core_url] = NcboCron.settings.search_index_all_url if (options[:solr_core_url].nil?)
-
     LinkedData::Models::Ontology.all.each  do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
@@ -79,7 +77,6 @@ unless options[:ontologies]
   puts opt_parser.help
   exit(1)
 end
-options[:solr_core_url] = LinkedData.settings.search_server_url if (options[:solr_core_url].nil?)
 
 if options[:optimize].nil? || options[:optimize] != "false"
   options[:optimize] = true
@@ -114,17 +111,28 @@ def index_ontology(indexed_ontologies, acronym, logger)
   end
 end
 
-def valid_url?(url)
-  url = URI.parse(url) rescue false
-  url.kind_of?(URI::HTTP) || url.kind_of?(URI::HTTPS)
+def extract_solr_collection(target)
+  return nil if target.nil?
+
+  target = target.strip
+  return nil if target.empty?
+
+  parsed_target = URI.parse(target) rescue nil
+  return target unless parsed_target.kind_of?(URI::HTTP) || parsed_target.kind_of?(URI::HTTPS)
+
+  path_segments = parsed_target.path.to_s.split('/').reject(&:empty?)
+  return nil if path_segments.empty? || path_segments.last == 'solr'
+
+  path_segments.last
 end
 
-abort("The Solr core URL you provided is invalid. Aborting...\n\n") unless valid_url?(options[:solr_core_url])
+options[:solr_collection] = extract_solr_collection(options[:solr_collection]) || Goo.search_collection_target(:term_search_active).to_s
+abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
 
-if options[:all] && options[:solr_core_url].downcase == LinkedData.settings.search_server_url.downcase
-  puts "WARNING: You are about to clear the main core search index on #{options[:solr_core_url]}!!! This will affect ALL searches!!! Are you sure you mean to do this?"
+if options[:all] && options[:solr_collection].downcase == Goo.search_collection_target(:term_search_active).to_s.downcase
+  puts "WARNING: You are about to clear the active term search collection #{options[:solr_collection]}!!! This will affect ALL searches!!! Are you sure you mean to do this?"
 elsif options[:all]
-  puts "You are about to clear the index on #{options[:solr_core_url]} and kick off a lengthy re-indexing process. Are you sure?"
+  puts "You are about to clear the term search collection #{options[:solr_collection]} and kick off a lengthy re-indexing process. Are you sure?"
 end
 
 if options[:all]
@@ -140,16 +148,20 @@ begin
   msg = ""
 
   if options[:all]
-    msg = "Processing index for all ontologies on #{options[:solr_core_url]}"
+    msg = "Processing index for all ontologies on #{options[:solr_collection]}"
   else
-    msg = "Processing index for ontologies: #{options[:ontologies]} on #{options[:solr_core_url]}"
+    msg = "Processing index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
   end
   puts msg
   logger.info(msg)
 
-  Goo.configure do |conf|
-    conf.add_search_backend(:main, service: options[:solr_core_url])
-  end
+  search_config = Goo.search_collection(:term_search_active)
+  Goo.set_search_collection_target(:term_search_active, options[:solr_collection].to_sym)
+  Goo.init_search_connection(:term_search_active,
+                             search_config[:search_backend],
+                             search_config[:block],
+                             force: true,
+                             target_collection: options[:solr_collection].to_sym)
 
   indexed_ontologies = []
   remaining_ontologies = options[:ontologies].length
@@ -158,7 +170,7 @@ begin
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index")
 
     if options[:all]
-      logger.info("Clearing existing index on #{options[:solr_core_url]}")
+      logger.info("Clearing existing index on #{options[:solr_collection]}")
       LinkedData::Models::Class.indexClear()
       LinkedData::Models::Class.indexCommit()
     end
@@ -180,9 +192,9 @@ begin
   end
 
   if options[:all]
-    msg = "Completed processing index for all ontologies on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
-    msg = "Completed processing index for ontologies: #{indexed_ontologies} on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing index for ontologies: #{indexed_ontologies} on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   end
   puts msg
   logger.info(msg)
