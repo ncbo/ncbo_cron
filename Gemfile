@@ -25,9 +25,9 @@ gem 'rest-client'
 gem 'sys-proctable'
 
 # NCBO
-gem 'goo', github: 'ncbo/goo', branch: 'main'
+gem 'goo', github: 'ncbo/goo', branch: 'feature/solrcloud-alias-indexing-codex'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'chore/ruby3.2-minitest6-compat'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'chore/ontoportal-lirmm-goo-compat'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'feature/solrcloud-alias-indexing-codex'
 gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'main'
 
 group :development do
