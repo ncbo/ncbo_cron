@@ -2,17 +2,21 @@
 
 Group = LinkedData::Models::Group
 
+unless Rake::Task.task_defined?(:ensure_config)
+  task :ensure_config do
+    require 'bundler/setup'
+    # Configure the process for the current cron configuration.
+    require_relative '../lib/ncbo_cron'
+    config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+    abort('Please create a config/config.rb file using the config/config.rb.sample as a template') unless config_exists
+    require_relative '../config/config'
+  end
+end
+
 desc 'Ontology Group Administration'
 namespace :group do
-  require 'bundler/setup'
-  # Configure the process for the current cron configuration.
-  require_relative '../lib/ncbo_cron'
-  config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
-  abort('Please create a config/config.rb file using the config/config.rb.sample as a template') unless config_exists
-  require_relative '../config/config'
-
   desc 'Create a new ontology group'
-  task :create, [:acronym, :name] do |_t, args|
+  task :create, [:acronym, :name] => :ensure_config do |_t, args|
     checkgroup = LinkedData::Models::Group.find(args.acronym).first
     abort("FAILED: The Group #{args.groupname} already exists") unless checkgroup.nil?
     group = LinkedData::Models::Group.new
@@ -25,7 +29,7 @@ namespace :group do
     end
   end
   desc 'Add ontology to a group'
-  task :add_ontology, [:group_acronym, :ontology_acronym] do |_t, args|
+  task :add_ontology, [:group_acronym, :ontology_acronym] => :ensure_config do |_t, args|
     grp = LinkedData::Models::Group.find(args.group_acronym).first
     abort("FAILED: The Group #{args.group_acronym} does not exist") if grp.nil?
     ontology = LinkedData::Models::Ontology.find(args.ontology_acronym).first

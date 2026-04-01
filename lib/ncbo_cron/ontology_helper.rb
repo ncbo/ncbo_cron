@@ -9,6 +9,8 @@ module NcboCron
       PROCESS_ACTIONS = {
         :process_rdf => true,
         :generate_labels => true,
+        :extract_metadata => true,
+        :index_all_data => true,
         :index_search => true,
         :index_properties => true,
         :run_metrics => true,
@@ -161,8 +163,8 @@ module NcboCron
       end
 
       def self.new_file_exists?(file, last)
-        file = File.open(file.path, "rb")
-        remote_contents = file.read
+        # Keep the original Tempfile reference alive so it isn't GC'd/unlinked.
+        remote_contents = File.binread(file.path)
         md5remote = Digest::MD5.hexdigest(remote_contents)
 
         if last.uploadFilePath && File.exist?(last.uploadFilePath)

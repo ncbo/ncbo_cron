@@ -4,6 +4,7 @@ task default: :test
 
 Rake::TestTask.new do |t|
   t.libs = []
+  t.warning = false
   t.test_files = FileList['test/**/test*.rb', 'test/**/*_test.rb']
   t.ruby_opts = ['-W1']
 end

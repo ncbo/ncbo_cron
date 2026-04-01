@@ -24,16 +24,15 @@ Gem::Specification.new do |gem|
   gem.add_dependency("ncbo_annotator")
   gem.add_dependency("ontologies_linked_data")
   gem.add_dependency("redis")
-  gem.add_dependency("rufus-scheduler", "~> 2.0.24")
+  gem.add_dependency("rufus-scheduler", "~> 3.9")
 
   gem.add_development_dependency "rubocop"
   gem.add_development_dependency "simplecov"
   gem.add_development_dependency "email_spec"
-  gem.add_development_dependency "minitest", '~> 5.2'
-  gem.add_development_dependency "minitest-hooks", "~> 1.5"
-  gem.add_development_dependency "minitest-reporters", "~> 1.7"
+  gem.add_development_dependency "minitest"
+  gem.add_development_dependency "minitest-hooks"
+  gem.add_development_dependency "minitest-reporters"
   gem.add_development_dependency "mocha", "~> 2.7"
   gem.add_development_dependency "simplecov-cobertura"
   gem.add_development_dependency "webmock", "~> 3.25"
-  gem.add_development_dependency "webrick"
 end

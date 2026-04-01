@@ -92,7 +92,7 @@ module NcboCron
         zombies
       end
 
-      def process_flush_classes(logger)
+      def process_flush_classes(logger, remove_zombie_graphs = false)
         onts = LinkedData::Models::Ontology.where.include(:acronym,:summaryOnly).all
         status_archived = LinkedData::Models::SubmissionStatus.find("ARCHIVED").first
         deleted = []
@@ -101,9 +101,9 @@ module NcboCron
           if !ont.summaryOnly
             logger.info("Checking graphs to delete for #{ont.id.to_s}")
             submissions = LinkedData::Models::OntologySubmission.where(ontology: ont)
-                            .include(:submissionId)
-                            .include(:submissionStatus)
-                            .all
+                                                                .include(:submissionId)
+                                                                .include(:submissionStatus)
+                                                                .all
             submissions = submissions.sort_by { |x| x.submissionId }.reverse[0..10]
             last_ready = ont.latest_submission(status: :ready)
             next if last_ready.nil?
@@ -135,6 +135,12 @@ module NcboCron
 
         zombie_classes_graphs.each do |zg|
           logger.info("Zombie class graph #{zg}"); logger.flush
+          # Not deleting zombie graph by default. Enable it with config.remove_zombie_graphs = true
+          if !remove_zombie_graphs.nil? && remove_zombie_graphs == true
+            Goo.sparql_data_client.delete_graph(RDF::URI.new(zg))
+            logger.info "DELETED #{zg} graph"
+            deleted << zg
+          end
         end
 
         logger.info("finish process_flush_classes"); logger.flush
@@ -142,7 +148,7 @@ module NcboCron
         deleted
       end
 
-      def process_submission(logger, submission_id, actions=ACTIONS)
+      def process_submission(logger, submission_id, actions = ACTIONS)
         multi_logger = LinkedData::Utils::MultiLogger.new(loggers: logger)
         t0 = Time.now
         sub = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(submission_id)).first
@@ -150,7 +156,7 @@ module NcboCron
         if sub
           sub.bring_remaining
           sub.ontology.bring(:acronym)
-          FileUtils.mkdir_p(sub.data_folder)
+          FileUtils.mkdir_p(sub.data_folder) unless Dir.exist?(sub.data_folder)
           log_path = sub.parsing_log_path
           logger.info "Logging parsing output to #{log_path}"
           logger1 = Logger.new(log_path)
@@ -193,11 +199,10 @@ module NcboCron
       def archive_old_submissions(logger, sub)
         # Mark older submissions archived
         logger.debug "Archiving submissions previous to #{sub.id.to_s}..."
-        submissions = LinkedData::Models::OntologySubmission
-                          .where(ontology: sub.ontology)
-                          .include(:submissionId)
-                          .include(:submissionStatus)
-                          .all
+        submissions = LinkedData::Models::OntologySubmission.where(ontology: sub.ontology)
+                                                            .include(:submissionId)
+                                                            .include(:submissionStatus)
+                                                            .all
         # Get recent submissions, sorted by submissionId (latest first)
         recent_submissions = submissions.sort { |a, b| b.submissionId <=> a.submissionId }[0..10]
         options = { process_rdf: false, index_search: false, index_commit: false,
@@ -210,6 +215,7 @@ module NcboCron
         logger.debug "Completed archiving submissions previous to #{sub.id.to_s}"
       end
 
+      # Add new ontology terms to the Annotator
       def process_annotator(logger, sub)
         parsed = sub.ready?(status: [:rdf, :rdf_labels])
 
