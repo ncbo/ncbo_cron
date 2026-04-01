@@ -2,6 +2,7 @@ require 'logger'
 
 # Scheduling/lock gems
 require 'redis-lock'
+require 'active_support/isolated_execution_state'
 require 'rufus/scheduler'
 
 module NcboCron
@@ -34,7 +35,8 @@ module NcboCron
 
       if scheduler_type == :every
         # Minutes/seconds string prep
-        interval = "#{seconds_between*1000}" if seconds_between
+        # Rufus expects explicit units; defaulting to seconds keeps intent clear.
+        interval = "#{seconds_between}s" if seconds_between
         interval = "#{minutes_between}m" if minutes_between
         interval = "5m" unless interval
       end
@@ -44,32 +46,37 @@ module NcboCron
       end
 
       redis = Redis.new(host: redis_host, port: redis_port)
-      scheduler = Rufus::Scheduler.start_new(:thread_name => job_name)
+      scheduler = Rufus::Scheduler.new(thread_name: job_name)
 
       scheduler.send(scheduler_type, interval, {:allow_overlapping => false}) do
-        redis.lock(job_name, life: lock_life, owner: "ncbo_cron") do
-          pid = fork do
-            $0 = job_name # rename the process
-            begin
-              logger.debug("#{job_name} -- Lock acquired"); logger.flush
+        begin
+          redis.lock(job_name, life: lock_life, owner: "ncbo_cron") do
+            pid = fork do
+              $0 = job_name # rename the process
+              begin
+                logger.debug("#{job_name} -- Lock acquired"); logger.flush
 
-              # Spawn a thread to re-acquire the lock every 60 seconds
-              Thread.new do
-                sleep(relock_period) do
-                  logger.debug("Re-locking for #{lock_life}")
-                  lock.extend_life(lock_life)
+                # Spawn a thread to re-acquire the lock every 60 seconds
+                Thread.new do
+                  sleep(relock_period) do
+                    logger.debug("Re-locking for #{lock_life}")
+                    lock.extend_life(lock_life)
+                  end
                 end
-              end
 
-              # Run the process if we have a job
-              yield if block_given?
-              process.call if process
-            ensure
-              Kernel.exit!
+                # Run the process if we have a job
+                yield if block_given?
+                process.call if process
+              ensure
+                Kernel.exit!
+              end
             end
+            logger.debug("#{job_name} -- running in pid #{pid}"); logger.flush
+            Process.wait(pid)
           end
-          logger.debug("#{job_name} -- running in pid #{pid}"); logger.flush
-          Process.wait(pid)
+        rescue Redis::Lock::LockNotAcquired
+          # Expected when another worker holds the lock; don't spam error logs.
+          logger.debug("#{job_name} -- Lock not acquired"); logger.flush
         end
       end
 
