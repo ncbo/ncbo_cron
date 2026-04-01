@@ -26,9 +26,9 @@ gem 'sys-proctable'
 
 # NCBO
 gem 'goo', github: 'ncbo/goo', branch: 'development'
-gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'chore/ruby3.2-minitest6-compat'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
 gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'development'
+gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
 
 group :development do
   gem 'rubocop', require: false
