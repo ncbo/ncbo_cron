@@ -28,3 +28,6 @@ logs/
 
 # Ignore jEnv files
 .java-version
+
+# Claude Code
+.claude/
