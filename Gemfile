@@ -26,9 +26,9 @@ gem 'sys-proctable'
 
 # NCBO
 gem 'goo', github: 'ncbo/goo', branch: 'feature/solrcloud-alias-indexing-codex'
-gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'chore/ruby3.2-minitest6-compat'
+gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
 gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'feature/solrcloud-alias-indexing-codex'
-gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'main'
+gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'development'
 
 group :development do
   gem 'rubocop', require: false

@@ -8,7 +8,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: d2cd049bcf7b81b8f7e5eb102b5ed244b4f24c14
+  revision: 2cd237f26202649e4d5cc569aac6272b8448858c
   branch: feature/solrcloud-alias-indexing-codex
   specs:
     goo (0.0.2)
@@ -26,8 +26,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: 2b4efe17a95b5be42ead4d4507c50c244ef24e0f
-  branch: chore/ruby3.2-minitest6-compat
+  revision: 7755a51ce891763a0ba174813796df116abca8a9
+  branch: develop
   specs:
     ncbo_annotator (0.0.1)
       goo
@@ -37,7 +37,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: f3fe7f9de03b7882a2442618a6fbc4fc89562ce1
+  revision: 8d5090aeeb78d6cd2bf5133ff926d0c1bac44f94
   branch: feature/solrcloud-alias-indexing-codex
   specs:
     ontologies_linked_data (0.0.1)
@@ -60,7 +60,7 @@ GIT
 GIT
   remote: https://github.com/ncbo/sparql-client.git
   revision: 2ac20b217bb7ad2b11305befe0ee77d75e44eac5
-  branch: main
+  branch: development
   specs:
     sparql-client (3.2.2)
       net-http-persistent (~> 4.0, >= 4.0.2)
