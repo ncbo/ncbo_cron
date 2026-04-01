@@ -68,8 +68,8 @@ NcboCron.config do |config|
 
   # Full reindex jobs now use the LinkedData search_server_url base URL above
   # and select the physical target collection via the cron CLI, for example:
-  #   ./bin/ncbo_ontology_index -a -c term_search_core2
-  #   ./bin/ncbo_ontology_index -a -c term_search_core2 -p
+  #   ./bin/ncbo_ontology_index -a -c term_search_rebuild
+  #   ./bin/ncbo_ontology_index -a -c term_search_rebuild -p
 
   # Sample configuration for Cloudflare Analytics integration
   # Cloudflare Zone Tag (unique identifier for your Cloudflare zone)

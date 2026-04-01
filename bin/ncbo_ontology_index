@@ -32,7 +32,7 @@ opt_parser = OptionParser.new do |opts|
   # Set a banner, displayed at the top of the help screen.
   #opts.banner = "Usage: ncbo_ontology_index [options]"
 
-  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name, or legacy Solr core URL, to use for indexing. Ex: term_search_core2') do |target|
+  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name to use for indexing. Ex: term_search_rebuild') do |target|
     options[:solr_collection] = target
   end
 

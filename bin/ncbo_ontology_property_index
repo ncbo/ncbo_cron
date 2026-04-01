@@ -29,7 +29,7 @@ require 'optparse'
 
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name, or legacy Solr core URL, to use for property indexing. Ex: prop_search_core2') do |target|
+  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name to use for property indexing. Ex: property_search_rebuild') do |target|
     options[:solr_collection] = target
   end
 
