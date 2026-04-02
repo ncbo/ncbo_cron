@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-Group = LinkedData::Models::Group
-
 unless Rake::Task.task_defined?(:ensure_config)
   task :ensure_config do
     require 'bundler/setup'
@@ -47,10 +45,10 @@ namespace :group do
   end
 
   desc 'Delete a group after interactive confirmation'
-  task :delete, [:acronym] do |_t, args|
+  task :delete, [:acronym] => :ensure_config do |_t, args|
     abort('FAILED: Please provide :acronym') if args[:acronym].blank?
 
-    group = Group.find(args.acronym).include(Group.attributes(:all)).first
+    group = LinkedData::Models::Group.find(args.acronym).include(LinkedData::Models::Group.attributes(:all)).first
     abort("FAILED: The #{args.acronym} group doesn't exist") if group.nil?
 
     abort('FAILED: Destructive operation requires interactive confirmation') unless $stdin.tty?
