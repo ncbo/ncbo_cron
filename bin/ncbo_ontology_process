@@ -16,21 +16,36 @@ require 'optparse'
 # do not send notifications to ontology owners when running this script
 LinkedData.settings.enable_notifications = false
 
+PRIORITY_ONTOLOGIES = [].freeze
+PRIORITY_ONTOLOGIES_ENV = 'NCBO_ONTOLOGY_PROCESS_PRIORITY_ONTOLOGIES'.freeze
+
+def sort_and_prioritize_ontologies(ontologies)
+  priority_ontologies = PRIORITY_ONTOLOGIES.dup
+  env_priority_ontologies = ENV.fetch(PRIORITY_ONTOLOGIES_ENV, '').split(',').map { |o| o.strip }.reject(&:empty?)
+  priority_ontologies.concat(env_priority_ontologies)
+  priority_ontologies.uniq!
+
+  sorted_ontologies = ontologies.uniq.sort
+  priority, remaining = sorted_ontologies.partition { |acronym| priority_ontologies.include?(acronym) }
+  priority + remaining
+end
+
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
   # Set a banner, displayed at the top of the help screen.
   #opts.banner = "Usage: ncbo_ontology_process [options]"
   options[:ontologies] = []
+  options[:exclude_ontologies] = []
   opts.on('-a', '--all-ontologies', 'Process all ontologies (this or -o option required).') do
-    LinkedData::Models::Ontology.all.each  do |ont|
-      ont.bring(:acronym)
-      options[:ontologies].push(ont.acronym)
-    end
     options[:all] = true
   end
 
   opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to process (this or -a option required).') do |acronyms|
     options[:ontologies] = acronyms.split(",").map {|o| o.strip}
+  end
+
+  opts.on('-x', '--exclude-ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to exclude when using -a.') do |acronyms|
+    options[:exclude_ontologies] = acronyms.split(",").map {|o| o.strip}
   end
 
   options[:tasks] = NcboCron::Models::OntologySubmissionParser::ACTIONS
@@ -58,6 +73,22 @@ end
 # Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
 # any options found there, as well as any parameters for the options.
 opt_parser.parse!
+if !options[:all] && !options[:exclude_ontologies].empty?
+  puts '--exclude-ontologies can only be used with --all-ontologies'
+  puts opt_parser.help
+  exit(1)
+end
+
+if options[:all]
+  LinkedData::Models::Ontology.all.each do |ont|
+    ont.bring(:acronym)
+    options[:ontologies].push(ont.acronym)
+  end
+  options[:ontologies] -= options[:exclude_ontologies]
+end
+
+options[:ontologies] = sort_and_prioritize_ontologies(options[:ontologies])
+
 if options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
@@ -74,7 +105,8 @@ end
 # MAIN
 #
 if options[:all]
-  puts "About to perform the following tasks on ALL ontologies: #{options[:tasks]}"
+  excl_msg = options[:exclude_ontologies].empty? ? '' : " excluding #{options[:exclude_ontologies]}"
+  puts "About to perform the following tasks on ALL ontologies#{excl_msg}: #{options[:tasks]}"
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -104,9 +136,10 @@ options[:ontologies].each do |acronym|
     end
 
     NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, options[:tasks])
-  rescue Exception => e
+  rescue SystemExit, Interrupt
+    raise
+  rescue StandardError => e
     msg = "Failed, exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
     logger.error(msg)
   end
 end
-

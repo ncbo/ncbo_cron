@@ -72,7 +72,9 @@ def check_http_file(uri)
       response = http.get(uri.request_uri)
       return response.code
     end
-  rescue Exception => e
+  rescue SystemExit, Interrupt
+    raise
+  rescue StandardError => e
     puts e.message
     return 500
   end
@@ -83,7 +85,9 @@ def check_ftp_file(uri)
   ftp.login
   begin
     return ftp.size(uri.path) > 0
-  rescue Exception => e
+  rescue SystemExit, Interrupt
+    raise
+  rescue StandardError => e
     # Check using another method
     path = uri.path.split("/")
     filename = path.pop
@@ -197,4 +201,3 @@ EOS
   end
 
 end
-

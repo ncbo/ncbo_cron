@@ -97,7 +97,9 @@ begin
     puts msg
     logger.info(msg)
   end
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed rebuilding #{options[:task]} with exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
   logger.error(msg)
   puts msg

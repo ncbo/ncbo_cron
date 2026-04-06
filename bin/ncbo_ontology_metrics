@@ -78,7 +78,9 @@ def generate_metrics_for_ontology(finished_ontologies, acronym, logger)
                                                                       index_search: false, index_commit: false,
                                                                       run_metrics: true, reasoning: false, diff: false})
     finished_ontologies << acronym
-  rescue Exception => e
+  rescue SystemExit, Interrupt
+    raise
+  rescue StandardError => e
     msg = "Exception: #{e.to_json}"
     puts msg
     logger.error(msg)
@@ -118,7 +120,9 @@ begin
   end
   puts msg
   logger.info(msg)
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed metrics generation with exception: #{e.to_json}"
   logger.error(msg)
   puts msg
