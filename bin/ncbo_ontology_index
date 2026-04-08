@@ -107,9 +107,8 @@ def index_ontology(indexed_ontologies, acronym, logger)
     # removal of the old index and committing a new index.  There is no 'dry-run' option.
     NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {index_search: true})
     indexed_ontologies << acronym
-  rescue SystemExit, Interrupt
-    raise
-  rescue StandardError => e
+  rescue Exception => e
+    raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     msg = "Exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
     puts msg
     logger.error(msg)

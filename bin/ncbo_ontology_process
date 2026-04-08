@@ -25,9 +25,17 @@ def sort_and_prioritize_ontologies(ontologies)
   priority_ontologies.concat(env_priority_ontologies)
   priority_ontologies.uniq!
 
-  sorted_ontologies = ontologies.uniq.sort
-  priority, remaining = sorted_ontologies.partition { |acronym| priority_ontologies.include?(acronym) }
-  priority + remaining
+  ontology_records = ontologies.uniq.sort.map do |acronym|
+    ont = LinkedData::Models::Ontology.find(acronym).include(:acronym, :viewingRestriction).first
+    {
+      acronym: acronym,
+      private: !ont.nil? && ont.viewingRestriction != 'public'
+    }
+  end
+
+  priority, remaining = ontology_records.partition { |ontology| priority_ontologies.include?(ontology[:acronym]) }
+  remaining_public, remaining_private = remaining.partition { |ontology| !ontology[:private] }
+  (priority + remaining_public + remaining_private).map { |ontology| ontology[:acronym] }
 end
 
 options = {all: false}
@@ -118,6 +126,7 @@ end
 logger = Logger.new(options[:logfile])
 puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
 
+remaining_ontologies = options[:ontologies].length
 options[:ontologies].each do |acronym|
   begin
     ont = LinkedData::Models::Ontology.find(acronym).first
@@ -136,10 +145,16 @@ options[:ontologies].each do |acronym|
     end
 
     NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, options[:tasks])
-  rescue SystemExit, Interrupt
-    raise
-  rescue StandardError => e
+  rescue Exception => e
+    raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     msg = "Failed, exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
     logger.error(msg)
+  ensure
+    remaining_ontologies -= 1
+    if remaining_ontologies > 0
+      msg = "There #{remaining_ontologies == 1 ? 'is' : 'are'} #{remaining_ontologies} ontolog#{remaining_ontologies == 1 ? 'y' : 'ies'} left to process."
+      puts msg
+      logger.info(msg)
+    end
   end
 end

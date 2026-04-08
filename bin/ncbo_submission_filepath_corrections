@@ -63,9 +63,8 @@ def create_submission_path(sub, ont)
   upload_file_path = "#{LinkedData.settings.repository_folder}/#{ont.acronym}/#{sub.submissionId}"
   begin
     FileUtils.mkdir_p upload_file_path
-  rescue SystemExit, Interrupt
-    raise
-  rescue StandardError => e
+  rescue Exception => e
+    raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     $logger.error("Failed to create submission repository directory.")
     raise e
   end
@@ -99,9 +98,8 @@ def retrievePullLocation2uploadFilePath(sub, ont)
     else
       raise "Remote file doesn't exist"
     end
-  rescue SystemExit, Interrupt
-    raise
-  rescue StandardError => e
+  rescue Exception => e
+    raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     $logger.error "Problem retrieving #{sub.pullLocation}:\n" + e.message + "\n" + e.backtrace.join("\n\t")
     $logger.flush()
   end
@@ -155,9 +153,8 @@ def process_submission_upload(sub, ont)
       begin
         FileUtils.copy(sub.uploadFilePath, upload_file, {:preserve => true, :verbose => true} )
         sub.uploadFilePath = upload_file
-      rescue SystemExit, Interrupt
-        raise
-      rescue StandardError => e
+      rescue Exception => e
+        raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
         if e.message.start_with? 'same file:'
           # If it's the same file, it's probably a symlink and we can update the sub.uploadFilePath anyway.
           sub.uploadFilePath = upload_file
@@ -173,9 +170,8 @@ def process_submission_upload(sub, ont)
       else
         $logger.error("Failed to update the triple store: #{sub.errors.to_json}" )
       end
-    rescue SystemExit, Interrupt
-      raise
-    rescue StandardError => e
+    rescue Exception => e
+      raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
       $logger.error("Failed to relocate the upload file")
       raise e
     end
@@ -187,9 +183,8 @@ def process_submission_upload(sub, ont)
         begin
           FileUtils.copy(sub.diffFilePath, diff_file, {:preserve => true, :verbose => true} )
           sub.diffFilePath = diff_file
-        rescue SystemExit, Interrupt
-          raise
-        rescue StandardError => e
+        rescue Exception => e
+          raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
           if e.message.start_with? 'same file:'
             # If it's the same file, it's probably a symlink and we can update the sub.diffFilePath anyway.
             sub.diffFilePath = diff_file
@@ -206,9 +201,8 @@ def process_submission_upload(sub, ont)
           $logger.error("Failed to update the triple store: #{sub.errors.to_json}" )
         end
       end
-    rescue SystemExit, Interrupt
-      raise
-    rescue StandardError => e
+    rescue Exception => e
+      raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
       $logger.error("Failed to relocate the diff file")
       raise e
     end
@@ -245,9 +239,8 @@ ontologies.each do |ont|
   submissions.each do |sub|
     begin
       process_submission_upload(sub, ont)
-    rescue SystemExit, Interrupt
-      raise
-    rescue StandardError => e
+    rescue Exception => e
+      raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
       $logger.error(e.message)
     end
   end
