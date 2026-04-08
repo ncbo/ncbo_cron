@@ -44,10 +44,11 @@ begin
   puts "Processing details are logged to #{options[:logfile]}"
   annotator = Annotator::Models::NcboAnnotator.new
   annotator.generate_dictionary_file()
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed, exception: #{e.to_json}."
   logger.error(msg)
   puts msg
   exit(1)
 end
-

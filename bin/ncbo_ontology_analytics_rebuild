@@ -57,7 +57,9 @@ begin
   msg = "Completed rebuilding ontology analytics repository in #{(time/60).round(1)} minutes."
   puts msg
   logger.info(msg)
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed rebuilding ontology analytics repository with exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
   logger.error(msg)
   puts msg
