@@ -23,24 +23,18 @@ elsif LinkedData.settings.goo_host.include? "prod"
 end
 puts "Running on #{platform} platform"
 
-require 'uri'
 require 'benchmark'
 require 'optparse'
 
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  # Set a banner, displayed at the top of the help screen.
-  #opts.banner = "Usage: ncbo_ontology_index [options]"
-
-  opts.on('-c', '--solr-core-url URL', 'Optional URL of the Solr core to be used for indexing. Ex: http://localhost:8983/solr/core1') do |url|
-    options[:solr_core_url] = url
+  opts.on('-c', '--collection NAME', 'Collection name to index into (required with -a). A new collection is created, indexed, then the alias is swapped to it.') do |name|
+    options[:collection] = name
   end
 
   options[:ontologies] = []
   opts.on('-a', '--all-ontologies', 'Index all ontologies (this or -o option required).') do
-    options[:solr_core_url] = NcboCron.settings.search_index_all_url if (options[:solr_core_url].nil?)
-
-    LinkedData::Models::Ontology.all.each  do |ont|
+    LinkedData::Models::Ontology.all.each do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
     end
@@ -60,11 +54,6 @@ opt_parser = OptionParser.new do |opts|
     options[:logfile] = filename
   end
 
-  #options[:verbose] = false
-  #opts.on( '-v', '--verbose', 'Output more information' ) do
-  #  options[:verbose] = true
-  #end
-
   # Display the help screen, all programs are assumed to have this option.
   opts.on( '-h', '--help', 'Display this screen' ) do
     puts opts
@@ -79,13 +68,19 @@ unless options[:ontologies]
   puts opt_parser.help
   exit(1)
 end
-options[:solr_core_url] = LinkedData.settings.search_server_url if (options[:solr_core_url].nil?)
+
+if options[:all] && options[:collection].nil?
+  abort("Error: -c (collection name) is required when using -a (all ontologies).\n" \
+        "Example: #{$0} -a -c term_search_20260413\n\n")
+end
 
 if options[:optimize].nil? || options[:optimize] != "false"
   options[:optimize] = true
 else
   options[:optimize] = false
 end
+
+ALIAS_NAME = :term_search
 
 def index_ontology(indexed_ontologies, acronym, logger)
   begin
@@ -114,20 +109,8 @@ def index_ontology(indexed_ontologies, acronym, logger)
   end
 end
 
-def valid_url?(url)
-  url = URI.parse(url) rescue false
-  url.kind_of?(URI::HTTP) || url.kind_of?(URI::HTTPS)
-end
-
-abort("The Solr core URL you provided is invalid. Aborting...\n\n") unless valid_url?(options[:solr_core_url])
-
-if options[:all] && options[:solr_core_url].downcase == LinkedData.settings.search_server_url.downcase
-  puts "WARNING: You are about to clear the main core search index on #{options[:solr_core_url]}!!! This will affect ALL searches!!! Are you sure you mean to do this?"
-elsif options[:all]
-  puts "You are about to clear the index on #{options[:solr_core_url]} and kick off a lengthy re-indexing process. Are you sure?"
-end
-
 if options[:all]
+  puts "You are about to create collection '#{options[:collection]}', re-index all ontologies into it, then swap the '#{ALIAS_NAME}' alias to point to it. Are you sure?"
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -137,18 +120,24 @@ end
 begin
   logger = Logger.new(options[:logfile])
   puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
-  msg = ""
 
   if options[:all]
-    msg = "Processing index for all ontologies on #{options[:solr_core_url]}"
-  else
-    msg = "Processing index for ontologies: #{options[:ontologies]} on #{options[:solr_core_url]}"
-  end
-  puts msg
-  logger.info(msg)
+    msg = "Processing full re-index for all ontologies into collection '#{options[:collection]}'"
+    puts msg
+    logger.info(msg)
 
-  Goo.configure do |conf|
-    conf.add_search_backend(:main, service: options[:solr_core_url])
+    # Create a new collection for re-indexing
+    logger.info("Creating reindex collection '#{options[:collection]}'...")
+    reindex_conn = Goo.create_reindex_connection(ALIAS_NAME, options[:collection])
+    target_collection = reindex_conn.collection_name
+
+    logger.info("Clearing new collection '#{target_collection}'...")
+    LinkedData::Models::Class.indexClear(target_collection)
+    LinkedData::Models::Class.indexCommit(nil, target_collection)
+  else
+    msg = "Processing index for ontologies: #{options[:ontologies]}"
+    puts msg
+    logger.info(msg)
   end
 
   indexed_ontologies = []
@@ -156,12 +145,6 @@ begin
 
   time = Benchmark.realtime do
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index")
-
-    if options[:all]
-      logger.info("Clearing existing index on #{options[:solr_core_url]}")
-      LinkedData::Models::Class.indexClear()
-      LinkedData::Models::Class.indexCommit()
-    end
 
     options[:ontologies].each do |acronym|
       index_ontology(indexed_ontologies, acronym, logger)
@@ -173,16 +156,26 @@ begin
       logger.info("Optimizing index...")
       logger.flush
       t0 = Time.now
-      LinkedData::Models::Class.indexOptimize()
+      if options[:all]
+        LinkedData::Models::Class.indexOptimize(nil, target_collection)
+      else
+        LinkedData::Models::Class.indexOptimize()
+      end
       logger.info("Completed optimizing index in #{Time.now - t0} sec.")
       logger.flush
+    end
+
+    if options[:all]
+      logger.info("Swapping alias '#{ALIAS_NAME}' to collection '#{target_collection}'...")
+      Goo.complete_reindex(ALIAS_NAME)
+      logger.info("Alias swap complete.")
     end
   end
 
   if options[:all]
-    msg = "Completed processing index for all ontologies on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed full re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias '#{ALIAS_NAME}' now points to '#{options[:collection]}'."
   else
-    msg = "Completed processing index for ontologies: #{indexed_ontologies} on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing index for ontologies: #{indexed_ontologies} in #{(time/60).round(1)} minutes."
   end
   puts msg
   logger.info(msg)
