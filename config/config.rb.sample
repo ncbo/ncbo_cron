@@ -66,8 +66,11 @@ NcboCron.config do |config|
   # do not deaemonize in docker
   config.daemonize  = false
 
-  config.search_index_all_url = "http://localhost:8983/solr"
-  config.property_search_index_all_url = "http://localhost:8983/solr"
+  # Note: search_index_all_url and property_search_index_all_url have been removed.
+  # Full re-indexing now uses SolrCloud aliases. Use the -c flag on the index scripts
+  # to specify the target collection name, e.g.:
+  #   ./bin/ncbo_ontology_index -a -c term_search_20260413
+  #   ./bin/ncbo_ontology_property_index -a -c prop_search_20260413
 
   # Sample configuration for Cloudflare Analytics integration
   # Cloudflare Zone Tag (unique identifier for your Cloudflare zone)
