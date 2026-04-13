@@ -25,10 +25,10 @@ gem 'rest-client'
 gem 'sys-proctable'
 
 # NCBO
-gem 'goo', github: 'ncbo/goo', branch: 'development'
+gem 'goo', github: 'ncbo/goo', branch: 'feature/solrcloud-alias-indexing-claude'
 gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'development'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'feature/solrcloud-alias-indexing-claude'
 
 group :development do
   gem 'rubocop', require: false
