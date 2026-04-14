@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+
+# Exit cleanly from an early interrupt
+Signal.trap("INT") { exit 1 }
+
+# Setup the bundled gems in our environment
+require 'bundler/setup'
+
+# Configure the process for the current cron configuration.
+require_relative '../lib/ncbo_cron'
+config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+require_relative '../config/config'
+
+ALIASES = {
+  term_search: "Term/class search",
+  prop_search: "Property search"
+}
+
+puts "SolrCloud Alias Status"
+puts "=" * 50
+
+ALIASES.each do |alias_name, description|
+  connector = Goo.search_client(alias_name)
+
+  if connector.nil?
+    puts "\n#{description} (#{alias_name}): NOT CONFIGURED"
+    next
+  end
+
+  puts "\n#{description}"
+  puts "-" * 40
+
+  if connector.aliased?
+    collection = connector.collection_name
+    puts "  Alias:      #{alias_name}"
+    puts "  Collection: #{collection}"
+  else
+    puts "  Collection: #{connector.collection_name} (no alias)"
+  end
+end
+
+puts

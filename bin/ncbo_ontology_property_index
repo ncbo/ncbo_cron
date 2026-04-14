@@ -23,56 +23,82 @@ elsif LinkedData.settings.goo_host.include? "prod"
 end
 puts "Running on #{platform} platform"
 
-require 'uri'
 require 'benchmark'
 require 'optparse'
 
+ALIAS_NAME = :prop_search
+
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  opts.on('-c', '--solr-core-url URL', 'Optional URL of the Solr core to be used for property indexing. Ex: http://localhost:8983/solr/prop_search_core1') do |url|
-    options[:solr_core_url] = url
-  end
+  opts.banner = "Usage: #{$0} [options]"
 
-  options[:ontologies] = []
-  opts.on('-a', '--all-ontologies', 'Index all ontologies properties (this or -o option required).') do
-    options[:solr_core_url] = NcboCron.settings.property_search_index_all_url if (options[:solr_core_url].nil?)
-
-    LinkedData::Models::Ontology.all.each  do |ont|
+  opts.on('-a', '--all-ontologies', 'Index all ontology properties (this or -o option required, unless using --promote-only).') do
+    LinkedData::Models::Ontology.all.each do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
     end
     options[:all] = true
   end
 
-  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies whose properties to index (this or -a option required).') do |acronyms|
+  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies whose properties to index.') do |acronyms|
     options[:ontologies] = acronyms.split(",").map {|o| o.strip}
   end
 
-  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the property index after the indexing completion. Default: true') do |optimize|
+  opts.on('-c', '--collection NAME', 'Target collection name (required with -a and --promote-only).') do |name|
+    options[:collection] = name
+  end
+
+  opts.on('-p', '--promote', 'Promote the alias to the new collection after successful indexing. Use with -a -c.') do
+    options[:promote] = true
+  end
+
+  opts.on('--promote-only', 'Promote the alias to an existing collection without rebuilding. Requires -c.') do
+    options[:promote_only] = true
+  end
+
+  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the property index after indexing. Default: true') do |optimize|
     options[:optimize] = optimize
   end
 
   options[:logfile] = STDOUT
-  opts.on( '-l', '--logfile FILE', "Write log to FILE (default is STDOUT)" ) do |filename|
+  opts.on('-l', '--logfile FILE', "Write log to FILE (default is STDOUT)") do |filename|
     options[:logfile] = filename
   end
 
-  # Display the help screen, all programs are assumed to have this option.
-  opts.on( '-h', '--help', 'Display this screen' ) do
+  opts.on('-h', '--help', 'Display this screen') do
     puts opts
+    puts
+    puts "Examples:"
+    puts "  Rebuild all into a new collection (no alias swap):"
+    puts "    #{$0} -a -c prop_search_rebuild"
+    puts
+    puts "  Rebuild all and promote alias on success:"
+    puts "    #{$0} -a -c prop_search_20260401 -p"
+    puts
+    puts "  Promote alias to an existing collection (no rebuild):"
+    puts "    #{$0} --promote-only -c prop_search_20260401"
+    puts
+    puts "  Re-index specific ontologies into the live alias:"
+    puts "    #{$0} -o SNOMEDCT,GO"
     exit
   end
 end
 
-# Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
-# any options found there, as well as any parameters for the options.
+options[:ontologies] = []
 opt_parser.parse!
-unless options[:ontologies]
+
+# Validate option combinations
+if options[:promote_only]
+  abort("Error: -c (collection name) is required with --promote-only.\n\n") if options[:collection].nil?
+  abort("Error: --promote-only cannot be combined with -a or -o.\n\n") if options[:all] || !options[:ontologies].empty?
+elsif options[:all]
+  abort("Error: -c (collection name) is required when using -a.\n" \
+        "Example: #{$0} -a -c prop_search_20260413\n\n") if options[:collection].nil?
+elsif options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
 end
 
-options[:solr_core_url] = LinkedData.settings.property_search_server_url if (options[:solr_core_url].nil?)
 if options[:optimize].nil? || options[:optimize] != "false"
   options[:optimize] = true
 else
@@ -101,45 +127,60 @@ def index_ontology_properties(indexed_ontologies, acronym, logger)
   rescue Exception => e
     raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     msg = "Exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
+    puts msg
     logger.error(msg)
   end
 end
 
-def valid_url?(url)
-  url = URI.parse(url) rescue false
-  url.kind_of?(URI::HTTP) || url.kind_of?(URI::HTTPS)
-end
+# --- Promote-only mode ---
+if options[:promote_only]
+  logger = Logger.new(options[:logfile])
+  collection = options[:collection]
 
-abort("The Solr core URL you provided is invalid. Aborting...\n\n") unless valid_url?(options[:solr_core_url])
-
-if options[:all] && options[:solr_core_url].downcase == LinkedData.settings.property_search_server_url.downcase
-  puts "WARNING: You are about to clear the main core property search index on #{options[:solr_core_url]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
-elsif options[:all]
-  puts "You are about to clear the property index on #{options[:solr_core_url]} and kick off a full re-indexing process. Are you sure?"
-end
-
-if options[:all]
+  puts "You are about to promote alias '#{ALIAS_NAME}' to point to collection '#{collection}'."
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
-  abort("Aborting...\n\n") unless (confirm.strip == 'yes')
+  abort("Aborting...\n\n") unless confirm.strip == 'yes'
+
+  old_collection = Goo.promote_alias(ALIAS_NAME, collection)
+  msg = "Alias '#{ALIAS_NAME}' promoted from '#{old_collection}' to '#{collection}'."
+  puts msg
+  logger.info(msg)
+  exit
+end
+
+# --- Full re-index or individual ontology mode ---
+if options[:all]
+  action = options[:promote] ? "re-index all ontology properties and promote alias" : "re-index all ontology properties (no alias swap)"
+  puts "You are about to create collection '#{options[:collection]}' and #{action}. Are you sure?"
+  puts "Type 'yes' to continue: "
+  $stdout.flush
+  confirm = $stdin.gets
+  abort("Aborting...\n\n") unless confirm.strip == 'yes'
 end
 
 begin
   logger = Logger.new(options[:logfile])
   puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
-  msg = ""
 
   if options[:all]
-    msg = "Processing property index for all ontologies on #{options[:solr_core_url]}"
-  else
-    msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_core_url]}"
-  end
-  puts msg
-  logger.info(msg)
+    msg = "Processing full property re-index for all ontologies into collection '#{options[:collection]}'"
+    puts msg
+    logger.info(msg)
 
-  Goo.configure do |conf|
-    conf.add_search_backend(:property, service: options[:solr_core_url])
+    # Create a new collection for re-indexing
+    logger.info("Creating reindex collection '#{options[:collection]}'...")
+    reindex_conn = Goo.create_reindex_connection(ALIAS_NAME, options[:collection])
+    target_collection = reindex_conn.collection_name
+
+    logger.info("Clearing new collection '#{target_collection}'...")
+    LinkedData::Models::OntologyProperty.indexClear(target_collection)
+    LinkedData::Models::OntologyProperty.indexCommit(nil, target_collection)
+  else
+    msg = "Processing property index for ontologies: #{options[:ontologies]}"
+    puts msg
+    logger.info(msg)
   end
 
   indexed_ontologies = []
@@ -147,12 +188,6 @@ begin
 
   time = Benchmark.realtime do
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index the properties of")
-
-    if options[:all]
-      logger.info("Clearing existing property index on #{options[:solr_core_url]}")
-      LinkedData::Models::Class.indexClear(:property)
-      LinkedData::Models::Class.indexCommit(nil, :property)
-    end
 
     options[:ontologies].each do |acronym|
       index_ontology_properties(indexed_ontologies, acronym, logger)
@@ -164,16 +199,30 @@ begin
       logger.info("Optimizing property index...")
       logger.flush
       t0 = Time.now
-      LinkedData::Models::Class.indexOptimize(nil, :property)
+      if options[:all]
+        LinkedData::Models::OntologyProperty.indexOptimize(nil, target_collection)
+      else
+        LinkedData::Models::OntologyProperty.indexOptimize()
+      end
       logger.info("Completed optimizing property index in #{Time.now - t0} sec.")
       logger.flush
+    end
+
+    if options[:all] && options[:promote]
+      logger.info("Promoting alias '#{ALIAS_NAME}' to collection '#{target_collection}'...")
+      Goo.promote_alias(ALIAS_NAME, target_collection)
+      logger.info("Alias promotion complete.")
     end
   end
 
   if options[:all]
-    msg = "Completed processing property index for all ontologies on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    if options[:promote]
+      msg = "Completed full property re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias '#{ALIAS_NAME}' now points to '#{options[:collection]}'."
+    else
+      msg = "Completed full property re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias NOT promoted — use --promote-only -c #{options[:collection]} to promote later."
+    end
   else
-    msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing property index for ontologies: #{indexed_ontologies} in #{(time/60).round(1)} minutes."
   end
   puts msg
   logger.info(msg)
