@@ -26,14 +26,13 @@ puts "Running on #{platform} platform"
 require 'benchmark'
 require 'optparse'
 
+ALIAS_NAME = :term_search
+
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  opts.on('-c', '--collection NAME', 'Collection name to index into (required with -a). A new collection is created, indexed, then the alias is swapped to it.') do |name|
-    options[:collection] = name
-  end
+  opts.banner = "Usage: #{$0} [options]"
 
-  options[:ontologies] = []
-  opts.on('-a', '--all-ontologies', 'Index all ontologies (this or -o option required).') do
+  opts.on('-a', '--all-ontologies', 'Index all ontologies (this or -o option required, unless using --promote-only).') do
     LinkedData::Models::Ontology.all.each do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
@@ -41,37 +40,63 @@ opt_parser = OptionParser.new do |opts|
     options[:all] = true
   end
 
-  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to index (this or -a option required).') do |acronyms|
+  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to index.') do |acronyms|
     options[:ontologies] = acronyms.split(",").map {|o| o.strip}
   end
 
-  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the index after the indexing completion. Default: true') do |optimize|
+  opts.on('-c', '--collection NAME', 'Target collection name (required with -a and --promote-only).') do |name|
+    options[:collection] = name
+  end
+
+  opts.on('-p', '--promote', 'Promote the alias to the new collection after successful indexing. Use with -a -c.') do
+    options[:promote] = true
+  end
+
+  opts.on('--promote-only', 'Promote the alias to an existing collection without rebuilding. Requires -c.') do
+    options[:promote_only] = true
+  end
+
+  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the index after indexing. Default: true') do |optimize|
     options[:optimize] = optimize
   end
 
   options[:logfile] = STDOUT
-  opts.on( '-l', '--logfile FILE', "Write log to FILE (default is STDOUT)" ) do |filename|
+  opts.on('-l', '--logfile FILE', "Write log to FILE (default is STDOUT)") do |filename|
     options[:logfile] = filename
   end
 
-  # Display the help screen, all programs are assumed to have this option.
-  opts.on( '-h', '--help', 'Display this screen' ) do
+  opts.on('-h', '--help', 'Display this screen') do
     puts opts
+    puts
+    puts "Examples:"
+    puts "  Rebuild all into a new collection (no alias swap):"
+    puts "    #{$0} -a -c term_search_rebuild"
+    puts
+    puts "  Rebuild all and promote alias on success:"
+    puts "    #{$0} -a -c term_search_20260401 -p"
+    puts
+    puts "  Promote alias to an existing collection (no rebuild):"
+    puts "    #{$0} --promote-only -c term_search_20260401"
+    puts
+    puts "  Re-index specific ontologies into the live alias:"
+    puts "    #{$0} -o SNOMEDCT,GO"
     exit
   end
 end
 
-# Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
-# any options found there, as well as any parameters for the options.
+options[:ontologies] = []
 opt_parser.parse!
-unless options[:ontologies]
+
+# Validate option combinations
+if options[:promote_only]
+  abort("Error: -c (collection name) is required with --promote-only.\n\n") if options[:collection].nil?
+  abort("Error: --promote-only cannot be combined with -a or -o.\n\n") if options[:all] || !options[:ontologies].empty?
+elsif options[:all]
+  abort("Error: -c (collection name) is required when using -a.\n" \
+        "Example: #{$0} -a -c term_search_20260413\n\n") if options[:collection].nil?
+elsif options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
-end
-
-if options[:all] && options[:collection].nil?
-  abort("Error: -c (collection name) is required when using -a (all ontologies).\n" \
-        "Example: #{$0} -a -c term_search_20260413\n\n")
 end
 
 if options[:optimize].nil? || options[:optimize] != "false"
@@ -79,8 +104,6 @@ if options[:optimize].nil? || options[:optimize] != "false"
 else
   options[:optimize] = false
 end
-
-ALIAS_NAME = :term_search
 
 def index_ontology(indexed_ontologies, acronym, logger)
   begin
@@ -109,12 +132,32 @@ def index_ontology(indexed_ontologies, acronym, logger)
   end
 end
 
-if options[:all]
-  puts "You are about to create collection '#{options[:collection]}', re-index all ontologies into it, then swap the '#{ALIAS_NAME}' alias to point to it. Are you sure?"
+# --- Promote-only mode ---
+if options[:promote_only]
+  logger = Logger.new(options[:logfile])
+  collection = options[:collection]
+
+  puts "You are about to promote alias '#{ALIAS_NAME}' to point to collection '#{collection}'."
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
-  abort("Aborting...\n\n") unless (confirm.strip == 'yes')
+  abort("Aborting...\n\n") unless confirm.strip == 'yes'
+
+  old_collection = Goo.promote_alias(ALIAS_NAME, collection)
+  msg = "Alias '#{ALIAS_NAME}' promoted from '#{old_collection}' to '#{collection}'."
+  puts msg
+  logger.info(msg)
+  exit
+end
+
+# --- Full re-index or individual ontology mode ---
+if options[:all]
+  action = options[:promote] ? "re-index all ontologies and promote alias" : "re-index all ontologies (no alias swap)"
+  puts "You are about to create collection '#{options[:collection]}' and #{action}. Are you sure?"
+  puts "Type 'yes' to continue: "
+  $stdout.flush
+  confirm = $stdin.gets
+  abort("Aborting...\n\n") unless confirm.strip == 'yes'
 end
 
 begin
@@ -165,15 +208,19 @@ begin
       logger.flush
     end
 
-    if options[:all]
-      logger.info("Swapping alias '#{ALIAS_NAME}' to collection '#{target_collection}'...")
-      Goo.complete_reindex(ALIAS_NAME)
-      logger.info("Alias swap complete.")
+    if options[:all] && options[:promote]
+      logger.info("Promoting alias '#{ALIAS_NAME}' to collection '#{target_collection}'...")
+      Goo.promote_alias(ALIAS_NAME, target_collection)
+      logger.info("Alias promotion complete.")
     end
   end
 
   if options[:all]
-    msg = "Completed full re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias '#{ALIAS_NAME}' now points to '#{options[:collection]}'."
+    if options[:promote]
+      msg = "Completed full re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias '#{ALIAS_NAME}' now points to '#{options[:collection]}'."
+    else
+      msg = "Completed full re-index into '#{options[:collection]}' in #{(time/60).round(1)} minutes. Alias NOT promoted — use --promote-only -c #{options[:collection]} to promote later."
+    end
   else
     msg = "Completed processing index for ontologies: #{indexed_ontologies} in #{(time/60).round(1)} minutes."
   end
