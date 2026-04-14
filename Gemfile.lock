@@ -8,7 +8,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: b28b43df426ff24e4e13001d3c1d773dbf8b8575
+  revision: 534648570e056c6da12e12e9f019a14459909dcf
   branch: feature/solrcloud-alias-indexing-claude
   specs:
     goo (0.0.2)
@@ -26,7 +26,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ncbo_annotator.git
-  revision: 7755a51ce891763a0ba174813796df116abca8a9
+  revision: 3e9c060baa3505af13671b06b3724524277fa301
   branch: develop
   specs:
     ncbo_annotator (0.0.1)
@@ -37,7 +37,7 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 974142153de9cd4b1cf66f76366c5f0de7c16980
+  revision: eed53891f29170fc13d4925606175d53ffc2e122
   branch: feature/solrcloud-alias-indexing-claude
   specs:
     ontologies_linked_data (0.0.1)
