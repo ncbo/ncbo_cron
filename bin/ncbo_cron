@@ -67,10 +67,10 @@ opt_parser = OptionParser.new do |opts|
   opts.on("-h", "--redis-host HOST", String, "redis host (for shared locking)", "(default: #{options[:redis_host]})") do |host|
     options[:redis_host] = host
   end
-  opts.on("--redis-port PORT", Integer, "redis port (for shared locking)", "(default: #{options[:redis_port]})") do |port|
+  opts.on("-p", "--redis-port PORT", Integer, "redis port (for shared locking)", "(default: #{options[:redis_port]})") do |port|
     options[:redis_port] = port
   end
-  opts.on("--log-level LEVEL", String, "set the log level (debug, info, error)", "(default: #{options[:log_level]})") do |c|
+  opts.on("-l", "--log-level LEVEL", String, "set the log level (debug, info, error)", "(default: #{options[:log_level]})") do |c|
     options[:log_level] = c.to_sym
   end
   opts.on("-m", "--minutes MIN", Integer, "minutes between process queue checks (override seconds)", "(default: #{options[:minutes_between]})") do |m|
@@ -127,10 +127,13 @@ opt_parser = OptionParser.new do |opts|
   opts.on("-f", "--flush-old-graphs SCHED", String, "cron schedule to delete class graphs of archive submissions", "(default: #{options[:cron_flush]})") do |c|
     options[:cron_flush] = c
   end
+  opts.on("--remove-zombie-graphs", "flush class graphs from deleted ontologies") do |v|
+    options[:remove_zombie_graphs] = true
+  end
   opts.on("-w", "--warm-long-queries SCHED", String, "cron schedule to warmup long time running queries", "(default: #{options[:cron_warmq]})") do |c|
     options[:cron_warmq] = c
-  end  
-  opts.on("--create-mapping-counts SCHED", String, "cron schedule to create mapping counts", "(default: #{options[:cron_mapping_counts]})") do |c|
+  end
+  opts.on("-m", "--create-mapping-counts SCHED", String, "cron schedule to create mapping counts", "(default: #{options[:cron_mapping_counts]})") do |c|
     options[:cron_mapping_counts] = c
   end
   opts.on("--cloudflare-analytics SCHED", String, "cron schedule to run Cloudflare analytics job", "(default: #{options[:cron_cloudflare_analytics]})") do |c|
@@ -275,8 +278,8 @@ runner.execute do |opts|
 
   if options[:enable_pull]
     pull_thread = Thread.new do
-      logger.debug "Setting up pull cron job"; logger.flush
       pull_options = options.dup
+      logger.info "Setting up pull cron job: #{pull_options[:pull_schedule]}"; logger.flush
       pull_options.delete(:minutes_between)
       pull_options.delete(:seconds_between)
       pull_options[:job_name] = "ncbo_cron_pull_thread"
@@ -288,14 +291,14 @@ runner.execute do |opts|
         logger.info "Starting ncbo pull"; logger.flush
         logger.info "Logging pull details to #{pull_log_path}"; logger.flush
         puller = NcboCron::Models::OntologyPull.new
-        pulled_onts = puller.do_remote_ontology_pull(logger: pull_logger,
-                                                     cache_clear: true)
+        pulled_onts = puller.do_remote_ontology_pull(logger: pull_logger, cache_clear: true)
         logger.info "Finished ncbo pull"; logger.flush
         logger.info "Pull summary:\n#{pulled_onts.map {|o| o.id.to_s}}"
       end
     end
   end
 
+  # Flush old graphs. Remove zombie graphs if config.remove_zombie_graphs = true
   if options[:enable_flush]
     flush_thread = Thread.new do
       flush_options = options.dup
@@ -312,7 +315,7 @@ runner.execute do |opts|
         logger.info "Logging flush details to #{flush_log_path}"; logger.flush
         t0 = Time.now
         parser = NcboCron::Models::OntologySubmissionParser.new
-        flush_onts = parser.process_flush_classes(flush_logger)
+        flush_onts = parser.process_flush_classes(flush_logger, flush_options[:remove_zombie_graphs])
         logger.info "Flushed #{flush_onts.length} submissions in #{Time.now - t0} sec."; logger.flush
         logger.info "Finished flush"; logger.flush
       end
@@ -443,6 +446,27 @@ runner.execute do |opts|
     end
   end
 
+  if options[:enable_ontologies_report]
+    graphs_report_thread = Thread.new do
+      graphs_count_report_options = options.dup
+      graphs_count_report_options[:job_name] = "ncbo_cron_graphs_counts_report"
+      graphs_count_report_options[:scheduler_type] = :cron
+      graphs_count_report_options[:cron_schedule] = graphs_count_report_options[:cron_ontologies_report]
+      logger.info "Setting up ontologies report generation job with #{graphs_count_report_options[:cron_ontologies_report]}"
+      logger.info "Writing ontologies report into #{graphs_count_report_options[:ontology_report_path]}"; logger.flush
+      ontologies_report_log_path = File.join(log_path, "#{log_filename_noExt}-graph-counts-report.log")
+      ontologies_report_logger = Logger.new(ontologies_report_log_path)
+      NcboCron::Scheduler.scheduled_locking_job(graphs_count_report_options) do
+        logger.info "Starting graph counts report generation"; logger.flush
+        logger.info "Logging graph counts report generation details to #{ontologies_report_log_path}"; logger.flush
+        t0 = Time.now
+        NcboCron::GraphsCounts.new(ontologies_report_logger, NcboCron.settings.graph_counts_report_path).run
+        logger.info "Graph counts report generation job completed in #{Time.now - t0} sec."; logger.flush
+        logger.info "Finished graph counts report generation"; logger.flush
+      end
+    end
+  end
+
   if options[:enable_index_synchronizer]
     index_synchronizer_thread = Thread.new do
       index_synchronizer_options = options.dup
@@ -561,6 +585,7 @@ runner.execute do |opts|
   cloudflare_analytics_thread.join if cloudflare_analytics_thread
   ontology_rank_thread.join if ontology_rank_thread
   ontologies_report_thread.join if ontologies_report_thread
+  graphs_report_thread.join if graphs_report_thread
   index_synchronizer_thread.join if index_synchronizer_thread
   spam_deletion_thread.join if spam_deletion_thread
   mapping_counts_thread.join if mapping_counts_thread

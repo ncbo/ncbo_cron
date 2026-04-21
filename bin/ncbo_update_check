@@ -48,7 +48,9 @@ begin
     puts "Update available. See details below:"
     puts update_info
   end
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed update check - #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
   logger.error(msg)
   puts msg

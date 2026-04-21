@@ -1,13 +1,15 @@
 require_relative 'test_case'
 # require_relative '../lib/ncbo_cron'
+require 'securerandom'
 
 class TestScheduler < TestCase
   def test_scheduler
     begin
       logger = Logger.new($stdout)
       logger.level = Logger::ERROR
+      job_name = "test_scheduled_job_locking_#{Process.pid}_#{SecureRandom.hex(4)}"
       options = {
-        job_name: 'test_scheduled_job',
+        job_name: job_name,
         seconds_between: 1,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port,
@@ -17,10 +19,10 @@ class TestScheduler < TestCase
       # Create a simple TCPServer to listen from the fork
       require 'socket'
       listen_string = ''
-      port = TestCase.unused_port
+      server = TCPServer.new('127.0.0.1', 0)
+      port = server.addr[1]
 
       socket_server = Thread.new do
-        server = TCPServer.new(port)
         loop do
           session = server.accept
           listen_string << session.gets
@@ -30,7 +32,7 @@ class TestScheduler < TestCase
       # Spawn a thread with a job that takes a while to finish
       job1_thread = Thread.new do
         NcboCron::Scheduler.scheduled_locking_job(options) do
-          client = TCPSocket.new('localhost', port)
+          client = TCPSocket.new('127.0.0.1', port)
           client.puts("MESSAGE_SENT\n")
         end
       end
@@ -53,14 +55,15 @@ class TestScheduler < TestCase
         socket_server.kill
         socket_server.join
       end
+      server.close if defined?(server) && !server.closed?
     end
   end
 
   def test_scheduler_locking
-    skip 'Skip: issues only on Apple Silicon + AllegroGraph in local dev.'
     begin
+      job_name = "test_scheduled_job_locking_#{Process.pid}_#{SecureRandom.hex(4)}"
       options = {
-        job_name: 'test_scheduled_job_locking',
+        job_name: job_name,
         seconds_between: 5,
         redis_host: NcboCron.settings.redis_host,
         redis_port: NcboCron.settings.redis_port
@@ -69,9 +72,9 @@ class TestScheduler < TestCase
       # Create a simple TCPServer to listen from the fork
       require 'socket'
       listen_string = ''
-      port = TestCase.unused_port
+      server = TCPServer.new('127.0.0.1', 0)
+      port = server.addr[1]
       socket_server = Thread.new do
-        server = TCPServer.new(port)
         loop do
           session = server.accept
           listen_string << session.gets
@@ -81,7 +84,7 @@ class TestScheduler < TestCase
       # Spawn a thread with a job that takes a while to finish
       job1_thread = Thread.new do
         NcboCron::Scheduler.scheduled_locking_job(options) do
-          client = TCPSocket.new('localhost', port)
+          client = TCPSocket.new('127.0.0.1', port)
           client.puts("JOB1\n")
           sleep(60)
         end
@@ -94,7 +97,7 @@ class TestScheduler < TestCase
       # be able to get a lock because of the long-running job above.
       job2_thread = Thread.new do
         NcboCron::Scheduler.scheduled_locking_job(options.merge(seconds_between: 1)) do
-          client = TCPSocket.new('localhost', port)
+          client = TCPSocket.new('127.0.0.1', port)
           client.puts("JOB2\n")
           sleep(60)
         end
@@ -125,6 +128,7 @@ class TestScheduler < TestCase
         socket_server.kill
         socket_server.join
       end
+      server.close if defined?(server) && !server.closed?
     end
   end
 end

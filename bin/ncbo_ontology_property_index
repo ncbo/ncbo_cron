@@ -99,6 +99,7 @@ def index_ontology_properties(indexed_ontologies, acronym, logger)
     NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {index_properties: true})
     indexed_ontologies << acronym
   rescue Exception => e
+    raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
     msg = "Exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
     logger.error(msg)
   end
@@ -176,7 +177,9 @@ begin
   end
   puts msg
   logger.info(msg)
-rescue Exception => e
+rescue SystemExit, Interrupt
+  raise
+rescue StandardError => e
   msg = "Failed property indexing with exception: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
   logger.error(msg)
   puts msg

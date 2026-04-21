@@ -19,9 +19,12 @@ require 'minitest/autorun'
 require 'minitest/hooks/test'
 require 'mocha/minitest'
 require 'webmock/minitest'
-require 'ontologies_linked_data'
+
+WebMock.allow_net_connect!
+Minitest.after_run { WebMock.reset! }
+
 require_relative '../lib/ncbo_cron'
-require_relative '../config/config'
+require_relative '../config/config.test'
 
 unless ENV['RM_INFO']
   require 'minitest/reporters'
@@ -29,7 +32,6 @@ unless ENV['RM_INFO']
 end
 
 Goo.use_cache = false # Make sure tests don't cache
-
 # Check to make sure you want to run if not pointed at localhost
 safe_host = Regexp.new(/localhost|-ut/)
 unless LinkedData.settings.goo_host.match(safe_host) &&
@@ -54,21 +56,7 @@ class TestCase < Minitest::Test
 
   def before_all
     super
-    WebMock.allow_net_connect!
     backend_triplestore_delete
-  end
-
-  def after_all
-    super
-    WebMock.reset!
-  end
-
-  # http://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers#Dynamic.2C_private_or_ephemeral_ports
-  def self.unused_port
-    server = TCPServer.new('127.0.0.1', 0)
-    port = server.addr[1]
-    server.close
-    port
   end
 
   private
@@ -84,14 +72,17 @@ class TestCase < Minitest::Test
 
   def backend_triplestore_delete
     raise StandardError, 'Too many triples in KB, does not seem right to run tests' unless
-      count_pattern('?s ?p ?o') < 400000
+      count_pattern('?s ?p ?o') < 400_000
 
     LinkedData::Models::Ontology.where.include(:acronym).each do |o|
-      query = "submissionAcronym:#{o.acronym}"
-      LinkedData::Models::Ontology.unindexByQuery(query)
+      o.unindex_all_data
     end
-    LinkedData::Models::Ontology.indexCommit
-    Goo.sparql_update_client.update('DELETE {?s ?p ?o } WHERE { ?s ?p ?o }')
+
+    graphs = Goo.sparql_query_client.query('SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o . } }')
+    graphs.each_solution do |sol|
+      Goo.sparql_data_client.delete_graph(sol[:g])
+    end
+
     LinkedData::Models::SubmissionStatus.init_enum
     LinkedData::Models::OntologyFormat.init_enum
     LinkedData::Models::OntologyType.init_enum

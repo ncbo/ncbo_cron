@@ -1,6 +1,4 @@
 require_relative 'test_case'
-require 'rack'
-require 'webrick'
 require 'email_spec'
 
 class TestOntologyPull < TestCase
@@ -9,22 +7,8 @@ class TestOntologyPull < TestCase
   def before_all
     super
     ont_path = File.expand_path('../data/ontology_files/BRO_v3.2.owl', __FILE__)
-    file = File.new(ont_path)
-    @@port = TestCase.unused_port
-    @@url = "http://localhost:#{@@port}/"
-    @@thread = Thread.new do
-      server = WEBrick::HTTPServer.new(Port: @@port)
-      server.mount_proc '/' do |_req, res|
-        contents = file.read
-        file.rewind
-        res.body = contents
-      end
-      begin
-        server.start
-      ensure
-        server.shutdown
-      end
-    end
+    @@ontology_file_contents = File.binread(ont_path)
+    @@url = 'http://ontology.example.test/BRO_v3.2.owl'
 
     @@redis = Redis.new(host: NcboCron.settings.redis_host, port: NcboCron.settings.redis_port)
     db_size = @@redis.dbsize
@@ -38,12 +22,12 @@ class TestOntologyPull < TestCase
   end
 
   def after_all
-    Thread.kill(@@thread)
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
     super
   end
 
   def test_remote_ontology_pull
+    stub_remote_ontology_success(@@url)
     ontologies = init_ontologies(1)
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
@@ -79,6 +63,7 @@ class TestOntologyPull < TestCase
   end
 
   def test_remote_pull_parsing_action
+    stub_remote_ontology_success(@@url)
     ontologies = init_ontologies(1, process_submissions: true)
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
@@ -105,73 +90,34 @@ class TestOntologyPull < TestCase
   end
 
   def test_pull_error_notification
-    server_port = TestCase.unused_port
+    error_url = 'http://ontology.example.test/404.owl'
+    stub_remote_ontology_not_found(error_url)
 
-    begin
-      thread = Thread.new do
-        server = WEBrick::HTTPServer.new(Port: server_port)
-        server.mount_proc '/' do |_req, res|
-          res.body = 'Hello, world!'
-        end
-        begin
-          server.start
-        ensure
-          server.shutdown
-        end
-      end
-      assert_equal true, thread.alive?
+    _ont_count, _acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
+      ont_count: 1, submission_count: 1, process_submission: false
+    )
+    ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:submissions).first
+    ont.bring_remaining
+    assert ont.valid?, "Invalid ontology: #{ont.errors}"
+    assert_equal 1, ont.submissions.length, "Incorrect number of submissions for #{ont.acronym}"
+    ont.save
 
-      _ont_count, _acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
-        ont_count: 1, submission_count: 1, process_submission: false
-      )
-      ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:submissions).first
-      ont.bring_remaining
-      assert ont.valid?, "Invalid ontology: #{ont.errors}"
-      assert_equal 1, ont.submissions.length, "Incorrect number of submissions for #{ont.acronym}"
-      ont.save
+    sub = ont.submissions.first
+    sub.bring_remaining
+    sub.pullLocation = RDF::IRI.new(error_url)
+    assert sub.valid?, "Invalid submission: #{sub.errors}"
+    sub.save
 
-      sub = ont.submissions.first
-      sub.bring_remaining
-      sub.pullLocation = RDF::IRI.new("http://localhost:#{server_port}")
-      assert sub.valid?, "Invalid submission: #{sub.errors}"
-      sub.save
-    ensure
-      thread.kill
-      sleep 3
-      assert_equal false, thread.alive?
-    end
+    pull = NcboCron::Models::OntologyPull.new
+    pull.do_remote_ontology_pull
 
-    begin
-      thread = Thread.new do
-        # Restart the web server with a 404 response status, which renders
-        # the pullLocation of the ontology submission in this test invalid.
-        server = WEBrick::HTTPServer.new(Port: server_port)
-        server.mount_proc '/' do |_req, res|
-          res.status = 404
-        end
-        begin
-          server.start
-        ensure
-          server.shutdown
-        end
-      end
-      assert_equal true, thread.alive?
-
-      pull = NcboCron::Models::OntologyPull.new
-      pull.do_remote_ontology_pull
-
-      assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
-      user = ont.administeredBy[0]
-      user.bring(:email)
-      assert(
-        last_email_sent.to.first.include?(user.email) ||
-        last_email_sent.header['Overridden-Sender'].value.include?(user.email)
-      )
-    ensure
-      thread.kill
-      sleep 3
-      assert_equal false, thread.alive?
-    end
+    assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
+    user = ont.administeredBy[0]
+    user.bring(:email)
+    assert(
+      last_email_sent.to.first.include?(user.email) ||
+      last_email_sent.header['Overridden-Sender'].value.include?(user.email)
+    )
   end
 
   def test_no_pull_location
@@ -210,5 +156,15 @@ class TestOntologyPull < TestCase
       sub.save rescue binding.pry
     end
     ontologies
+  end
+
+  def stub_remote_ontology_success(url)
+    stub_request(:head, url).to_return(status: 200)
+    stub_request(:get, url).to_return(status: 200, body: @@ontology_file_contents)
+  end
+
+  def stub_remote_ontology_not_found(url)
+    stub_request(:head, url).to_return(status: 404)
+    stub_request(:get, url).to_return(status: 404)
   end
 end
