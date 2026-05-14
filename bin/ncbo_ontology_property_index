@@ -124,20 +124,23 @@ def extract_solr_collection(target)
   path_segments.last
 end
 
-active_alias_name = Goo.search_collection_target(:property_search_active).to_s
-options[:solr_collection] = extract_solr_collection(options[:solr_collection]) || active_alias_name
+active_alias_name = Goo.search_collection_target(:property_search).to_s
+requested_collection = extract_solr_collection(options[:solr_collection])
+options[:solr_collection] = requested_collection || active_alias_name
 abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
 abort("The --promote-only option cannot be combined with -a/--all-ontologies or -o/--ontologies.\n\n") if options[:promote_only] && (options[:all] || options[:ontologies].any?)
 abort("Promoting the active alias is only supported with -a/--all-ontologies.\n\n") if options[:promote_active_alias] && !options[:all]
-abort("The --promote-only option requires -c/--solr-collection.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("Full reindexing requires -c/--solr-collection with a physical collection name.\n\n") if options[:all] && requested_collection.nil?
+abort("The --promote-only option requires -c/--solr-collection.\n\n") if options[:promote_only] && requested_collection.nil?
+abort("Full reindexing requires a physical collection name, not the active alias.\n\n") if options[:all] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
 abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_active_alias] && options[:solr_collection].downcase == active_alias_name.downcase
 
 if options[:promote_only]
   puts "You are about to promote the active property search alias #{active_alias_name} to #{options[:solr_collection]}. Are you sure?"
-elsif options[:all] && options[:solr_collection].downcase == active_alias_name.downcase
-  puts "WARNING: You are about to clear the active property search collection #{options[:solr_collection]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
 elsif options[:all]
-  puts "You are about to clear the property search collection #{options[:solr_collection]} and kick off a full re-indexing process. Are you sure?"
+  promote_message = options[:promote_active_alias] ? ' and promote the active alias after success' : ''
+  puts "You are about to clear the property search collection #{options[:solr_collection]} and kick off a full re-indexing process#{promote_message}. Are you sure?"
 end
 
 if options[:all] || options[:promote_only]
@@ -162,13 +165,13 @@ begin
   puts msg
   logger.info(msg)
 
-  search_config = Goo.search_collection(:property_search_active)
+  search_config = Goo.search_collection(:property_search)
   admin_connector = SOLR::SolrConnector.new(Goo.search_conf(search_config[:search_backend]), active_alias_name)
   abort("The target collection #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:promote_only] && !admin_connector.collection_exists?(options[:solr_collection])
 
   unless options[:promote_only]
-    Goo.set_search_collection_target(:property_search_active, options[:solr_collection].to_sym)
-    Goo.init_search_connection(:property_search_active,
+    Goo.set_search_collection_target(:property_search, options[:solr_collection].to_sym)
+    Goo.init_search_connection(:property_search,
                                search_config[:search_backend],
                                search_config[:block],
                                force: true,
@@ -181,7 +184,7 @@ begin
   time = Benchmark.realtime do
     if options[:promote_only]
       logger.info("Promoting active property search alias without rebuilding.")
-      Goo.promote_search_alias(:property_search_active, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+      Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
       logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
       logger.flush
       next
@@ -191,8 +194,8 @@ begin
 
     if options[:all]
       logger.info("Clearing existing property index on #{options[:solr_collection]}")
-      LinkedData::Models::Class.indexClear(:property_search_active)
-      LinkedData::Models::Class.indexCommit(nil, :property_search_active)
+      LinkedData::Models::Class.indexClear(:property_search)
+      LinkedData::Models::Class.indexCommit(nil, :property_search)
     end
 
     options[:ontologies].each do |acronym|
@@ -205,14 +208,14 @@ begin
       logger.info("Optimizing property index...")
       logger.flush
       t0 = Time.now
-      LinkedData::Models::Class.indexOptimize(nil, :property_search_active)
+      LinkedData::Models::Class.indexOptimize(nil, :property_search)
       logger.info("Completed optimizing property index in #{Time.now - t0} sec.")
       logger.flush
     end
 
     if options[:promote_active_alias]
       logger.info("Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}...")
-      Goo.promote_search_alias(:property_search_active, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+      Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
       logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
       logger.flush
     end
