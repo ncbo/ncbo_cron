@@ -66,6 +66,19 @@ opt_parser = OptionParser.new do |opts|
   # Display the help screen, all programs are assumed to have this option.
   opts.on( '-h', '--help', 'Display this screen' ) do
     puts opts
+    puts
+    puts "Examples:"
+    puts "  Rebuild all into a new collection (no alias swap):"
+    puts "    #{$0} -a -c property_search_rebuild"
+    puts
+    puts "  Rebuild all and promote the active alias on success:"
+    puts "    #{$0} -a -c property_search_20260401_1 -p"
+    puts
+    puts "  Promote the active alias to an existing collection (no rebuild):"
+    puts "    #{$0} --promote-only -c property_search_20260401_1"
+    puts
+    puts "  Re-index properties for specific ontologies into the live alias:"
+    puts "    #{$0} -o SNOMEDCT,GO"
     exit
   end
 end
@@ -154,6 +167,7 @@ begin
   logger = Logger.new(options[:logfile])
   puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
   msg = ""
+  promote_skipped_due_to_failure = false
 
   if options[:promote_only]
     msg = "Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}"
@@ -214,15 +228,29 @@ begin
     end
 
     if options[:promote_active_alias]
-      logger.info("Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}...")
-      Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
-      logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
-      logger.flush
+      failed_ontologies = options[:ontologies] - indexed_ontologies
+      if failed_ontologies.any?
+        err = "Skipping alias promotion: #{failed_ontologies.size} ontology property indexing failure(s): #{failed_ontologies.join(', ')}. " \
+              "Investigate the failures, then run --promote-only -c #{options[:solr_collection]} after manual review."
+        logger.error(err)
+        puts "ERROR: #{err}"
+        promote_skipped_due_to_failure = true
+        logger.flush
+      else
+        logger.info("Committing property index on #{options[:solr_collection]} before alias promotion...")
+        LinkedData::Models::Class.indexCommit(nil, :property_search)
+        logger.info("Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}...")
+        Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+        logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
+        logger.flush
+      end
     end
   end
 
   if options[:promote_only]
     msg = "Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
+  elsif promote_skipped_due_to_failure
+    msg = "Completed property search rebuild with failures on #{options[:solr_collection]} in #{(time/60).round(1)} minutes. Alias #{active_alias_name} was NOT promoted."
   elsif options[:all]
     msg = "Completed processing property index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
@@ -236,3 +264,5 @@ rescue Exception => e
   puts msg
   exit(1)
 end
+
+exit(1) if promote_skipped_due_to_failure
