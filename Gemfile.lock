@@ -8,8 +8,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 90365864f67a9458011f16e1b9f44a73af0d3739
-  branch: development
+  revision: ceb7598cca8e869b48611bb09b4fb28d21590ec9
+  branch: feature/solrcloud-alias-indexing-codex
   specs:
     goo (0.0.2)
       addressable (~> 2.8)
@@ -37,8 +37,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 25b2776dfd71e3ca329ced716760cfaf8ef3bc9a
-  branch: develop
+  revision: e152f6363587a579b2141484bf7d1053b1072642
+  branch: feature/solrcloud-alias-indexing-codex
   specs:
     ontologies_linked_data (0.0.1)
       activesupport

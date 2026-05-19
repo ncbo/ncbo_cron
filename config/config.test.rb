@@ -45,5 +45,7 @@ NcboCron.config do |config|
   config.daemonize  = false
   config.redis_host = REDIS_HOST.to_s
   config.redis_port = REDIS_PORT.to_s
+  # Full reindex jobs use the LinkedData search_server_url base URL above and
+  # select the physical target collection via the cron CLI.
   config.ontology_report_path = REPORT_PATH
 end
