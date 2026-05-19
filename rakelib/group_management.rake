@@ -1,5 +1,5 @@
-# rake tasks for group and category management
-#
+# frozen_string_literal: true
+
 unless Rake::Task.task_defined?(:ensure_config)
   task :ensure_config do
     require 'bundler/setup'
@@ -42,5 +42,36 @@ namespace :group do
     else
       puts "FAILED: add ontology #{args.ontology_acronym} to a  #{args.group_acronym} group"
     end
+  end
+
+  desc 'Delete a group after interactive confirmation'
+  task :delete, [:acronym] => :ensure_config do |_t, args|
+    abort('FAILED: Please provide :acronym') if args[:acronym].blank?
+
+    group = LinkedData::Models::Group.find(args.acronym).include(LinkedData::Models::Group.attributes(:all)).first
+    abort("FAILED: The #{args.acronym} group doesn't exist") if group.nil?
+
+    abort('FAILED: Destructive operation requires interactive confirmation') unless $stdin.tty?
+
+    print "Type yes to permanently delete group '#{args.acronym}': "
+    response = $stdin.gets&.strip
+    abort('Aborted: group was not deleted') unless response == 'yes'
+
+    # Remove references to this group from ontologies
+    onts = group.ontologies
+    onts.each do |ont|
+      ont.bring_remaining
+      ont.group = ont.group.reject { |g| g.id.split('/')[-1].eql?(args.acronym) }
+      if ont.valid?
+        ont.save
+        puts "Removed #{ont.acronym} from the #{args.acronym} group"
+      else
+        abort("FAILED: #{ont.acronym} is invalid and couldn't be saved: #{ont.errors}")
+      end
+    end
+
+    group.delete
+    puts "Deleted group '#{args.acronym}'."
+    puts 'NOTE: If the API still returns stale data, clear the goo and HTTP caches.'
   end
 end

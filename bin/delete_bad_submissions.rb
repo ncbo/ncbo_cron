@@ -55,6 +55,7 @@ LinkedData::Models::Ontology.all.each do |ont|
         logger.info("Submission id is not numeric #{s.id}: #{s.submissionId.class}")
       end
     rescue Exception => e
+      raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
       bad_subs << s
       logger.info("Error retrieving submission id #{s.id}: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
     end
@@ -65,6 +66,7 @@ LinkedData::Models::Ontology.all.each do |ont|
         puts "#{s.id}: hasOntologyLanguage nil"
       end
     rescue Exception => e
+      raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
       bad_subs << s
       logger.info("Error retrieving hasOntologyLanguage for submission #{s.id}: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
     end

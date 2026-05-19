@@ -221,7 +221,9 @@ def submission_status4annotator(sub, submission_status)
     else
       submission_status.push('ANNOTATIONS_MISSING_DATA')
     end
-  rescue Exception => e
+  rescue SystemExit, Interrupt
+    raise
+  rescue StandardError => e
     submission_status.push("ANNOTATIONS_ERROR:#{e.message}")
   end
 end
