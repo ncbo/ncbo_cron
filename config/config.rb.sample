@@ -35,6 +35,11 @@ LinkedData.config do |config|
   config.repository_folder             = REPOSITORY_FOLDER.to_s
   config.search_server_url             = SOLR_TERM_SEARCH_URL.to_s
   config.property_search_server_url    = SOLR_PROP_SEARCH_URL.to_s
+  # When migrating an existing SolrCloud deployment, point these at the
+  # current physical collections so the logical aliases can be created without
+  # rebuilding or clearing existing index data.
+  # config.term_search_bootstrap_collection = :term_search_core1
+  # config.property_search_bootstrap_collection = :prop_search_core1
 #  config.replace_url_prefix            = false
 #  config.rest_url_prefix               = REST_URL_PREFIX.to_s
   # Email notifications.
