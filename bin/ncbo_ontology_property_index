@@ -29,14 +29,12 @@ require 'optparse'
 
 options = {all: false}
 opt_parser = OptionParser.new do |opts|
-  opts.on('-c', '--solr-core-url URL', 'Optional URL of the Solr core to be used for property indexing. Ex: http://localhost:8983/solr/prop_search_core1') do |url|
-    options[:solr_core_url] = url
+  opts.on('-c', '--solr-collection TARGET', 'Optional Solr collection name to use for property indexing. Ex: property_search_rebuild') do |target|
+    options[:solr_collection] = target
   end
 
   options[:ontologies] = []
   opts.on('-a', '--all-ontologies', 'Index all ontologies properties (this or -o option required).') do
-    options[:solr_core_url] = NcboCron.settings.property_search_index_all_url if (options[:solr_core_url].nil?)
-
     LinkedData::Models::Ontology.all.each  do |ont|
       ont.bring(:acronym)
       options[:ontologies].push(ont.acronym)
@@ -52,6 +50,14 @@ opt_parser = OptionParser.new do |opts|
     options[:optimize] = optimize
   end
 
+  opts.on('-p', '--promote-active-alias', 'Promote the active property search alias to the target collection after a successful rebuild.') do
+    options[:promote_active_alias] = true
+  end
+
+  opts.on('--promote-only', 'Promote the active property search alias to the target collection without rebuilding.') do
+    options[:promote_only] = true
+  end
+
   options[:logfile] = STDOUT
   opts.on( '-l', '--logfile FILE', "Write log to FILE (default is STDOUT)" ) do |filename|
     options[:logfile] = filename
@@ -60,6 +66,19 @@ opt_parser = OptionParser.new do |opts|
   # Display the help screen, all programs are assumed to have this option.
   opts.on( '-h', '--help', 'Display this screen' ) do
     puts opts
+    puts
+    puts "Examples:"
+    puts "  Rebuild all into a new collection (no alias swap):"
+    puts "    #{$0} -a -c property_search_rebuild"
+    puts
+    puts "  Rebuild all and promote the active alias on success:"
+    puts "    #{$0} -a -c property_search_20260401_1 -p"
+    puts
+    puts "  Promote the active alias to an existing collection (no rebuild):"
+    puts "    #{$0} --promote-only -c property_search_20260401_1"
+    puts
+    puts "  Re-index properties for specific ontologies into the live alias:"
+    puts "    #{$0} -o SNOMEDCT,GO"
     exit
   end
 end
@@ -67,12 +86,11 @@ end
 # Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
 # any options found there, as well as any parameters for the options.
 opt_parser.parse!
-unless options[:ontologies]
+if !options[:promote_only] && options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
 end
 
-options[:solr_core_url] = LinkedData.settings.property_search_server_url if (options[:solr_core_url].nil?)
 if options[:optimize].nil? || options[:optimize] != "false"
   options[:optimize] = true
 else
@@ -105,20 +123,41 @@ def index_ontology_properties(indexed_ontologies, acronym, logger)
   end
 end
 
-def valid_url?(url)
-  url = URI.parse(url) rescue false
-  url.kind_of?(URI::HTTP) || url.kind_of?(URI::HTTPS)
+def extract_solr_collection(target)
+  return nil if target.nil?
+
+  target = target.strip
+  return nil if target.empty?
+
+  parsed_target = URI.parse(target) rescue nil
+  return target unless parsed_target.kind_of?(URI::HTTP) || parsed_target.kind_of?(URI::HTTPS)
+
+  path_segments = parsed_target.path.to_s.split('/').reject(&:empty?)
+  return nil if path_segments.empty? || path_segments.last == 'solr'
+
+  path_segments.last
 end
 
-abort("The Solr core URL you provided is invalid. Aborting...\n\n") unless valid_url?(options[:solr_core_url])
+active_alias_name = Goo.search_collection_target(:property_search).to_s
+requested_collection = extract_solr_collection(options[:solr_collection])
+options[:solr_collection] = requested_collection || active_alias_name
+abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
+abort("The --promote-only option cannot be combined with -a/--all-ontologies or -o/--ontologies.\n\n") if options[:promote_only] && (options[:all] || options[:ontologies].any?)
+abort("Promoting the active alias is only supported with -a/--all-ontologies.\n\n") if options[:promote_active_alias] && !options[:all]
+abort("Full reindexing requires -c/--solr-collection with a physical collection name.\n\n") if options[:all] && requested_collection.nil?
+abort("The --promote-only option requires -c/--solr-collection.\n\n") if options[:promote_only] && requested_collection.nil?
+abort("Full reindexing requires a physical collection name, not the active alias.\n\n") if options[:all] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_active_alias] && options[:solr_collection].downcase == active_alias_name.downcase
 
-if options[:all] && options[:solr_core_url].downcase == LinkedData.settings.property_search_server_url.downcase
-  puts "WARNING: You are about to clear the main core property search index on #{options[:solr_core_url]}!!! This will affect ALL property searches!!! Are you sure you mean to do this?"
+if options[:promote_only]
+  puts "You are about to promote the active property search alias #{active_alias_name} to #{options[:solr_collection]}. Are you sure?"
 elsif options[:all]
-  puts "You are about to clear the property index on #{options[:solr_core_url]} and kick off a full re-indexing process. Are you sure?"
+  promote_message = options[:promote_active_alias] ? ' and promote the active alias after success' : ''
+  puts "You are about to clear the property search collection #{options[:solr_collection]} and kick off a full re-indexing process#{promote_message}. Are you sure?"
 end
 
-if options[:all]
+if options[:all] || options[:promote_only]
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -129,29 +168,49 @@ begin
   logger = Logger.new(options[:logfile])
   puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
   msg = ""
+  promote_skipped_due_to_failure = false
 
-  if options[:all]
-    msg = "Processing property index for all ontologies on #{options[:solr_core_url]}"
+  if options[:promote_only]
+    msg = "Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}"
+  elsif options[:all]
+    msg = "Processing property index for all ontologies on #{options[:solr_collection]}"
   else
-    msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_core_url]}"
+    msg = "Processing property index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
   end
   puts msg
   logger.info(msg)
 
-  Goo.configure do |conf|
-    conf.add_search_backend(:property, service: options[:solr_core_url])
+  search_config = Goo.search_collection(:property_search)
+  admin_connector = SOLR::SolrConnector.new(Goo.search_conf(search_config[:search_backend]), active_alias_name)
+  abort("The target collection #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:promote_only] && !admin_connector.collection_exists?(options[:solr_collection])
+
+  unless options[:promote_only]
+    Goo.set_search_collection_target(:property_search, options[:solr_collection].to_sym)
+    Goo.init_search_connection(:property_search,
+                               search_config[:search_backend],
+                               search_config[:block],
+                               force: true,
+                               target_collection: options[:solr_collection].to_sym)
   end
 
   indexed_ontologies = []
-  remaining_ontologies = options[:ontologies].length
+  remaining_ontologies = options[:ontologies]&.length.to_i
 
   time = Benchmark.realtime do
+    if options[:promote_only]
+      logger.info("Promoting active property search alias without rebuilding.")
+      Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+      logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
+      logger.flush
+      next
+    end
+
     logger.info("There is a total of #{options[:ontologies].length} ontolog#{options[:ontologies].length > 1 ? "ies" : "y"} to index the properties of")
 
     if options[:all]
-      logger.info("Clearing existing property index on #{options[:solr_core_url]}")
-      LinkedData::Models::Class.indexClear(:property)
-      LinkedData::Models::Class.indexCommit(nil, :property)
+      logger.info("Clearing existing property index on #{options[:solr_collection]}")
+      LinkedData::Models::Class.indexClear(:property_search)
+      LinkedData::Models::Class.indexCommit(nil, :property_search)
     end
 
     options[:ontologies].each do |acronym|
@@ -164,16 +223,39 @@ begin
       logger.info("Optimizing property index...")
       logger.flush
       t0 = Time.now
-      LinkedData::Models::Class.indexOptimize(nil, :property)
+      LinkedData::Models::Class.indexOptimize(nil, :property_search)
       logger.info("Completed optimizing property index in #{Time.now - t0} sec.")
       logger.flush
     end
+
+    if options[:promote_active_alias]
+      failed_ontologies = options[:ontologies] - indexed_ontologies
+      if failed_ontologies.any?
+        err = "Skipping alias promotion: #{failed_ontologies.size} ontology property indexing failure(s): #{failed_ontologies.join(', ')}. " \
+              "Investigate the failures, then run --promote-only -c #{options[:solr_collection]} after manual review."
+        logger.error(err)
+        puts "ERROR: #{err}"
+        promote_skipped_due_to_failure = true
+        logger.flush
+      else
+        logger.info("Committing property index on #{options[:solr_collection]} before alias promotion...")
+        LinkedData::Models::Class.indexCommit(nil, :property_search)
+        logger.info("Promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}...")
+        Goo.promote_search_alias(:property_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
+        logger.info("Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]}.")
+        logger.flush
+      end
+    end
   end
 
-  if options[:all]
-    msg = "Completed processing property index for all ontologies on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+  if options[:promote_only]
+    msg = "Completed promoting active property search alias #{active_alias_name} to #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
+  elsif promote_skipped_due_to_failure
+    msg = "Completed property search rebuild with failures on #{options[:solr_collection]} in #{(time/60).round(1)} minutes. Alias #{active_alias_name} was NOT promoted."
+  elsif options[:all]
+    msg = "Completed processing property index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
-    msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_core_url]} in #{(time/60).round(1)} minutes."
+    msg = "Completed processing property index for ontologies: #{indexed_ontologies} on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   end
   puts msg
   logger.info(msg)
@@ -185,3 +267,5 @@ rescue StandardError => e
   puts msg
   exit(1)
 end
+
+exit(1) if promote_skipped_due_to_failure

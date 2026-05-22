@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+
+Signal.trap("INT") { exit 1 }
+
+require 'bundler/setup'
+
+require_relative '../lib/ncbo_cron'
+config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+ENV['LINKEDDATA_SKIP_CONNECT_GOO'] = 'true'
+require_relative '../config/config'
+
+ALIASES = [
+  ['Term/class search', LinkedData.settings.search_server_url, Goo.search_collection_target(:term_search).to_s],
+  ['Property search', LinkedData.settings.property_search_server_url, Goo.search_collection_target(:property_search).to_s]
+].freeze
+
+def print_alias_resolution(label, solr_url, alias_name)
+  connector = SOLR::SolrConnector.new(solr_url, alias_name)
+  resolved_collections = connector.resolve_alias(alias_name)
+  resolved_value = resolved_collections.empty? ? '(alias not defined)' : resolved_collections.join(', ')
+
+  puts
+  puts label
+  puts '-' * 40
+  puts "  Solr:       #{solr_url}"
+  puts "  Alias:      #{alias_name}"
+  puts "  Collection: #{resolved_value}"
+end
+
+puts 'SolrCloud Alias Status'
+puts '=' * 50
+
+ALIASES.each do |label, solr_url, alias_name|
+  print_alias_resolution(label, solr_url, alias_name)
+end
+
+puts
