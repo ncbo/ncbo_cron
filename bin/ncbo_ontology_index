@@ -184,7 +184,9 @@ abort("Refreshing all ontologies requires a physical collection name, not the ac
 abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
 abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_active_alias] && options[:solr_collection].downcase == active_alias_name.downcase
 
-if options[:promote_only]
+if options[:preflight]
+  # Preflight exits before any write path; do not require the destructive-operation confirmation.
+elsif options[:promote_only]
   puts "You are about to promote the active term search alias #{active_alias_name} to #{options[:solr_collection]}. Are you sure?"
 elsif options[:all]
   promote_message = options[:promote_active_alias] ? ' and promote the active alias after success' : ''
@@ -193,7 +195,7 @@ elsif options[:refresh_all]
   puts "You are about to refresh all ontologies in the existing term search collection #{options[:solr_collection]} without clearing it first. Are you sure?"
 end
 
-if options[:all] || options[:refresh_all] || options[:promote_only]
+if !options[:preflight] && (options[:all] || options[:refresh_all] || options[:promote_only])
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -201,8 +203,8 @@ if options[:all] || options[:refresh_all] || options[:promote_only]
 end
 
 begin
-  logger = Logger.new(options[:logfile])
-  puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}"
+  logger = options[:preflight] ? nil : Logger.new(options[:logfile])
+  puts "Processing details are logged to #{options[:logfile] == STDOUT ? "STDOUT" : options[:logfile]}" unless options[:preflight]
   msg = ""
   promote_skipped_due_to_failure = false
 
@@ -215,8 +217,10 @@ begin
   else
     msg = "Processing index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
   end
-  puts msg
-  logger.info(msg)
+  unless options[:preflight]
+    puts msg
+    logger.info(msg)
+  end
 
   search_config = Goo.search_collection(:term_search)
   solr_url = options[:preflight] ? LinkedData.settings.search_server_url : Goo.search_conf(search_config[:search_backend])
@@ -230,6 +234,8 @@ begin
     alias_resolution = admin_connector.resolve_alias(active_alias_name)
     target_exists = admin_connector.collection_exists?(options[:solr_collection])
     target_is_alias = admin_connector.alias_exists?(options[:solr_collection])
+    target_resolution = target_is_alias ? admin_connector.resolve_alias(options[:solr_collection]) : []
+    effective_write_target = target_is_alias ? target_resolution.join(', ') : options[:solr_collection]
     mode = if options[:promote_only]
              'promote-only'
            elsif options[:all]
@@ -239,16 +245,30 @@ begin
            else
              'selected-ontology-index'
            end
+    target_status = if target_is_alias
+                      "alias -> #{effective_write_target.empty? ? '(unresolved)' : effective_write_target}"
+                    elsif target_exists
+                      'physical collection exists'
+                    elsif options[:all]
+                      'new physical collection will be created'
+                    else
+                      'physical collection does not exist'
+                    end
 
+    preflight_rows = {
+      'Mode' => mode,
+      'Ontologies' => options[:ontologies].empty? ? '(none)' : options[:ontologies].join(', '),
+      'Target' => options[:solr_collection],
+      'Target status' => target_status,
+      'Active alias' => "#{active_alias_name} -> #{alias_resolution.empty? ? '(alias not defined)' : alias_resolution.join(', ')}",
+      'Clears index' => options[:all] ? 'yes' : 'no'
+    }
+
+    label_width = preflight_rows.keys.map(&:length).max
     puts "Preflight complete. No Solr data was modified."
-    puts "  Mode:             #{mode}"
-    puts "  Active alias:     #{active_alias_name}"
-    puts "  Alias resolves to: #{alias_resolution.empty? ? '(alias not defined)' : alias_resolution.join(', ')}"
-    puts "  Target:           #{options[:solr_collection]}"
-    puts "  Target exists:    #{target_exists}"
-    puts "  Target is alias:  #{target_is_alias}"
-    puts "  Ontologies:       #{options[:ontologies].empty? ? '(none)' : options[:ontologies].join(', ')}"
-    puts "  Clears index:     #{options[:all] ? 'yes' : 'no'}"
+    preflight_rows.each do |label, value|
+      puts "  #{label.ljust(label_width)} : #{value}"
+    end
     exit(0)
   end
 
