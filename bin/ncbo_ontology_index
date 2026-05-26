@@ -5,6 +5,12 @@ Signal.trap("INT") { exit 1 }
 
 # Setup the bundled gems in our environment
 require 'bundler/setup'
+require 'uri'
+require 'benchmark'
+require 'optparse'
+
+read_only_invocation = ARGV.include?('--preflight') || ARGV.include?('--help') || ARGV.include?('-h')
+ENV['LINKEDDATA_SKIP_CONNECT_GOO'] ||= 'true' if read_only_invocation
 
 # Configure the process for the current cron configuration.
 require_relative '../lib/ncbo_cron'
@@ -12,22 +18,7 @@ config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__)
 abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
 require_relative '../config/config'
 
-# do not send notifications to ontology owners when running this script
-LinkedData.settings.enable_notifications = false
-
-platform = "local"
-if LinkedData.settings.goo_host.include? "stage"
-  platform = "stage"
-elsif LinkedData.settings.goo_host.include? "prod"
-  platform = "prod"
-end
-puts "Running on #{platform} platform"
-
-require 'uri'
-require 'benchmark'
-require 'optparse'
-
-options = {all: false}
+options = {all: false, refresh_all: false}
 opt_parser = OptionParser.new do |opts|
   # Set a banner, displayed at the top of the help screen.
   #opts.banner = "Usage: ncbo_ontology_index [options]"
@@ -37,16 +28,17 @@ opt_parser = OptionParser.new do |opts|
   end
 
   options[:ontologies] = []
-  opts.on('-a', '--all-ontologies', 'Index all ontologies (this or -o option required).') do
-    LinkedData::Models::Ontology.all.each  do |ont|
-      ont.bring(:acronym)
-      options[:ontologies].push(ont.acronym)
-    end
+  opts.on('-a', '--all-ontologies', 'Clear and index all ontologies into a new physical collection (this, --refresh-all, or -o option required).') do
     options[:all] = true
   end
 
-  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to index (this or -a option required).') do |acronyms|
+  opts.on('--refresh-all', 'Index all ontologies into an existing physical collection without clearing it first.') do
+    options[:refresh_all] = true
+  end
+
+  opts.on('-o', '--ontologies ACRONYM1,ACRONYM2,ACRONYM3', 'Comma-separated list of ontologies to index (this, --refresh-all, or -a option required).') do |acronyms|
     options[:ontologies] = acronyms.split(",").map {|o| o.strip}
+    options[:selected_ontologies] = true
   end
 
   opts.on('-z', '--optimize [true/false]', 'Whether to optimize the index after the indexing completion. Default: true') do |optimize|
@@ -59,6 +51,10 @@ opt_parser = OptionParser.new do |opts|
 
   opts.on('--promote-only', 'Promote the active term search alias to the target collection without rebuilding.') do
     options[:promote_only] = true
+  end
+
+  opts.on('--preflight', 'Validate and describe the indexing target without modifying Solr or processing ontologies.') do
+    options[:preflight] = true
   end
 
   options[:logfile] = STDOUT
@@ -85,6 +81,9 @@ opt_parser = OptionParser.new do |opts|
     puts "  Promote the active alias to an existing collection (no rebuild):"
     puts "    #{$0} --promote-only -c term_search_20260401_1"
     puts
+    puts "  Refresh all ontologies in an existing collection without clearing it:"
+    puts "    #{$0} --refresh-all -c term_search_core1"
+    puts
     puts "  Re-index specific ontologies into the live alias:"
     puts "    #{$0} -o SNOMEDCT,GO"
     exit
@@ -94,6 +93,27 @@ end
 # Parse the command-line. The 'parse' method simply parses ARGV, while the 'parse!' method parses ARGV and removes
 # any options found there, as well as any parameters for the options.
 opt_parser.parse!
+
+# do not send notifications to ontology owners when running this script
+LinkedData.settings.enable_notifications = false
+
+platform = "local"
+if LinkedData.settings.goo_host.include? "stage"
+  platform = "stage"
+elsif LinkedData.settings.goo_host.include? "prod"
+  platform = "prod"
+end
+puts "Running on #{platform} platform"
+
+if (options[:all] || options[:refresh_all]) && !options[:preflight]
+  LinkedData::Models::Ontology.all.each  do |ont|
+    ont.bring(:acronym)
+    options[:ontologies].push(ont.acronym)
+  end
+elsif options[:preflight] && (options[:all] || options[:refresh_all])
+  options[:ontologies] = ['(all ontologies)']
+end
+
 if !options[:promote_only] && options[:ontologies].empty?
   puts opt_parser.help
   exit(1)
@@ -152,11 +172,15 @@ active_alias_name = Goo.search_collection_target(:term_search).to_s
 requested_collection = extract_solr_collection(options[:solr_collection])
 options[:solr_collection] = requested_collection || active_alias_name
 abort("The Solr collection you provided is invalid. Aborting...\n\n") if options[:solr_collection].nil? || options[:solr_collection].empty?
-abort("The --promote-only option cannot be combined with -a/--all-ontologies or -o/--ontologies.\n\n") if options[:promote_only] && (options[:all] || options[:ontologies].any?)
+abort("The --refresh-all option cannot be combined with -a/--all-ontologies.\n\n") if options[:refresh_all] && options[:all]
+abort("The --refresh-all option cannot be combined with -o/--ontologies.\n\n") if options[:refresh_all] && options[:selected_ontologies]
+abort("The --promote-only option cannot be combined with -a/--all-ontologies, --refresh-all, or -o/--ontologies.\n\n") if options[:promote_only] && (options[:all] || options[:refresh_all] || options[:ontologies].any?)
 abort("Promoting the active alias is only supported with -a/--all-ontologies.\n\n") if options[:promote_active_alias] && !options[:all]
 abort("Full reindexing requires -c/--solr-collection with a physical collection name.\n\n") if options[:all] && requested_collection.nil?
+abort("Refreshing all ontologies requires -c/--solr-collection with an existing physical collection name.\n\n") if options[:refresh_all] && requested_collection.nil?
 abort("The --promote-only option requires -c/--solr-collection.\n\n") if options[:promote_only] && requested_collection.nil?
 abort("Full reindexing requires a physical collection name, not the active alias.\n\n") if options[:all] && options[:solr_collection].downcase == active_alias_name.downcase
+abort("Refreshing all ontologies requires a physical collection name, not the active alias.\n\n") if options[:refresh_all] && options[:solr_collection].downcase == active_alias_name.downcase
 abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_only] && options[:solr_collection].downcase == active_alias_name.downcase
 abort("The target collection must be a physical collection name when promoting the active alias.\n\n") if options[:promote_active_alias] && options[:solr_collection].downcase == active_alias_name.downcase
 
@@ -165,9 +189,11 @@ if options[:promote_only]
 elsif options[:all]
   promote_message = options[:promote_active_alias] ? ' and promote the active alias after success' : ''
   puts "You are about to clear the term search collection #{options[:solr_collection]} and kick off a lengthy re-indexing process#{promote_message}. Are you sure?"
+elsif options[:refresh_all]
+  puts "You are about to refresh all ontologies in the existing term search collection #{options[:solr_collection]} without clearing it first. Are you sure?"
 end
 
-if options[:all] || options[:promote_only]
+if options[:all] || options[:refresh_all] || options[:promote_only]
   puts "Type 'yes' to continue: "
   $stdout.flush
   confirm = $stdin.gets
@@ -184,6 +210,8 @@ begin
     msg = "Promoting active term search alias #{active_alias_name} to #{options[:solr_collection]}"
   elsif options[:all]
     msg = "Processing index for all ontologies on #{options[:solr_collection]}"
+  elsif options[:refresh_all]
+    msg = "Refreshing index for all ontologies on #{options[:solr_collection]} without clearing first"
   else
     msg = "Processing index for ontologies: #{options[:ontologies]} on #{options[:solr_collection]}"
   end
@@ -191,16 +219,48 @@ begin
   logger.info(msg)
 
   search_config = Goo.search_collection(:term_search)
-  admin_connector = SOLR::SolrConnector.new(Goo.search_conf(search_config[:search_backend]), active_alias_name)
+  solr_url = options[:preflight] ? LinkedData.settings.search_server_url : Goo.search_conf(search_config[:search_backend])
+  admin_connector = SOLR::SolrConnector.new(solr_url, active_alias_name)
   abort("The target collection #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:promote_only] && !admin_connector.collection_exists?(options[:solr_collection])
+  abort("The target collection #{options[:solr_collection]} is a Solr alias, not a physical collection. Aborting...\n\n") if requested_collection && !options[:promote_only] && admin_connector.alias_exists?(options[:solr_collection])
+  abort("Full reindexing requires a new physical collection. #{options[:solr_collection]} already exists. Aborting...\n\n") if options[:all] && admin_connector.collection_exists?(options[:solr_collection])
+  abort("Refreshing all ontologies requires an existing physical collection. #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:refresh_all] && !admin_connector.collection_exists?(options[:solr_collection])
+
+  if options[:preflight]
+    alias_resolution = admin_connector.resolve_alias(active_alias_name)
+    target_exists = admin_connector.collection_exists?(options[:solr_collection])
+    target_is_alias = admin_connector.alias_exists?(options[:solr_collection])
+    mode = if options[:promote_only]
+             'promote-only'
+           elsif options[:all]
+             'clear-and-rebuild-all'
+           elsif options[:refresh_all]
+             'refresh-all-without-clearing'
+           else
+             'selected-ontology-index'
+           end
+
+    puts "Preflight complete. No Solr data was modified."
+    puts "  Mode:             #{mode}"
+    puts "  Active alias:     #{active_alias_name}"
+    puts "  Alias resolves to: #{alias_resolution.empty? ? '(alias not defined)' : alias_resolution.join(', ')}"
+    puts "  Target:           #{options[:solr_collection]}"
+    puts "  Target exists:    #{target_exists}"
+    puts "  Target is alias:  #{target_is_alias}"
+    puts "  Ontologies:       #{options[:ontologies].empty? ? '(none)' : options[:ontologies].join(', ')}"
+    puts "  Clears index:     #{options[:all] ? 'yes' : 'no'}"
+    exit(0)
+  end
 
   unless options[:promote_only]
+    bootstrap_collection = requested_collection ? options[:solr_collection].to_sym : search_config[:bootstrap_collection]
     Goo.set_search_collection_target(:term_search, options[:solr_collection].to_sym)
     Goo.init_search_connection(:term_search,
                                search_config[:search_backend],
                                search_config[:block],
-                               force: true,
-                               target_collection: options[:solr_collection].to_sym)
+                               force: false,
+                               target_collection: options[:solr_collection].to_sym,
+                               bootstrap_collection: bootstrap_collection)
   end
 
   indexed_ontologies = []
@@ -264,6 +324,8 @@ begin
     msg = "Completed term search rebuild with failures on #{options[:solr_collection]} in #{(time/60).round(1)} minutes. Alias #{active_alias_name} was NOT promoted."
   elsif options[:all]
     msg = "Completed processing index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
+  elsif options[:refresh_all]
+    msg = "Completed refreshing index for all ontologies on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   else
     msg = "Completed processing index for ontologies: #{indexed_ontologies} on #{options[:solr_collection]} in #{(time/60).round(1)} minutes."
   end
