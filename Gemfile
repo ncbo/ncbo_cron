@@ -25,10 +25,10 @@ gem 'rest-client'
 gem 'sys-proctable'
 
 # NCBO
-gem 'goo', github: 'ncbo/goo', branch: 'main'
-gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'main'
-gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'master'
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'master'
+gem 'goo', github: 'ncbo/goo', branch: 'development'
+gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'development'
+gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
 
 group :development do
   gem 'rubocop', require: false
