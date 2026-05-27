@@ -189,12 +189,20 @@ begin
   unless options[:promote_only]
     bootstrap_collection = requested_collection ? options[:solr_collection].to_sym : search_config[:bootstrap_collection]
     Goo.set_search_collection_target(:property_search, options[:solr_collection].to_sym)
+    Goo.reset_search_connection(:property_search)
     Goo.init_search_connection(:property_search,
                                search_config[:search_backend],
                                search_config[:block],
                                force: false,
                                target_collection: options[:solr_collection].to_sym,
                                bootstrap_collection: bootstrap_collection)
+
+    if requested_collection && Goo.search_client(:property_search).collection_name.to_s != options[:solr_collection]
+      abort("The property search connection is still targeting #{Goo.search_client(:property_search).collection_name}, " \
+            "not #{options[:solr_collection]}. Aborting...\n\n")
+    end
+
+    abort("Failed to create target collection #{options[:solr_collection]}. Aborting...\n\n") if options[:all] && !admin_connector.collection_exists?(options[:solr_collection])
   end
 
   indexed_ontologies = []
