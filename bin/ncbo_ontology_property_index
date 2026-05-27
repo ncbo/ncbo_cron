@@ -183,14 +183,18 @@ begin
   search_config = Goo.search_collection(:property_search)
   admin_connector = SOLR::SolrConnector.new(Goo.search_conf(search_config[:search_backend]), active_alias_name)
   abort("The target collection #{options[:solr_collection]} does not exist. Aborting...\n\n") if options[:promote_only] && !admin_connector.collection_exists?(options[:solr_collection])
+  abort("The target collection #{options[:solr_collection]} is a Solr alias, not a physical collection. Aborting...\n\n") if requested_collection && !options[:promote_only] && admin_connector.alias_exists?(options[:solr_collection])
+  abort("Full property reindexing requires a new physical collection. #{options[:solr_collection]} already exists. Aborting...\n\n") if options[:all] && admin_connector.collection_exists?(options[:solr_collection])
 
   unless options[:promote_only]
+    bootstrap_collection = requested_collection ? options[:solr_collection].to_sym : search_config[:bootstrap_collection]
     Goo.set_search_collection_target(:property_search, options[:solr_collection].to_sym)
     Goo.init_search_connection(:property_search,
                                search_config[:search_backend],
                                search_config[:block],
-                               force: true,
-                               target_collection: options[:solr_collection].to_sym)
+                               force: false,
+                               target_collection: options[:solr_collection].to_sym,
+                               bootstrap_collection: bootstrap_collection)
   end
 
   indexed_ontologies = []
