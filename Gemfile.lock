@@ -8,8 +8,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 28329ce66ca724ba3652576938e9dc219ca496bf
-  branch: development
+  revision: 5c3a3aca915ebed7cd4ca70be049889756eb47da
+  branch: fix/incorrect-search-result-ranking
   specs:
     goo (0.0.2)
       addressable (~> 2.8)
@@ -37,8 +37,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 74da285befef6adeb321783d3578ed750de288d0
-  branch: develop
+  revision: b4ff72abf77ba223540e0002e304d282d43f0060
+  branch: fix/incorrect-search-result-ranking
   specs:
     ontologies_linked_data (0.0.1)
       activesupport
