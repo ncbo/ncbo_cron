@@ -125,7 +125,7 @@ else
   options[:optimize] = false
 end
 
-def index_ontology(indexed_ontologies, acronym, logger)
+def index_ontology(indexed_ontologies, acronym, logger, index_commit_within)
   begin
     ont = LinkedData::Models::Ontology.find(acronym).first
 
@@ -143,7 +143,7 @@ def index_ontology(indexed_ontologies, acronym, logger)
     end
     # NOTE: process_submission controls all aspects of re-indexing, including
     # removal of the old index and committing a new index.  There is no 'dry-run' option.
-    NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {index_search: true})
+    NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {index_search: true, index_commit_within: index_commit_within})
     indexed_ontologies << acronym
   rescue Exception => e
     raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
@@ -293,6 +293,7 @@ begin
 
   indexed_ontologies = []
   remaining_ontologies = options[:ontologies]&.length.to_i
+  index_commit_within = (options[:all] || options[:refresh_all]) ? nil : 30_000
 
   time = Benchmark.realtime do
     if options[:promote_only]
@@ -312,7 +313,7 @@ begin
     end
 
     options[:ontologies].each do |acronym|
-      index_ontology(indexed_ontologies, acronym, logger)
+      index_ontology(indexed_ontologies, acronym, logger, index_commit_within)
       remaining_ontologies -= 1
       logger.info("There is a total of #{remaining_ontologies} ontolog#{remaining_ontologies > 1 ? "ies" : "y"} remaining out of #{options[:ontologies].length} ontologies") if (remaining_ontologies > 0)
     end
