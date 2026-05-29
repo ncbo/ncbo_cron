@@ -125,7 +125,7 @@ else
   options[:optimize] = false
 end
 
-def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit)
+def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv)
   begin
     ont = LinkedData::Models::Ontology.find(acronym).first
 
@@ -146,7 +146,8 @@ def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, ind
     NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {
       index_search: true,
       index_commit: index_commit,
-      index_commit_within: index_commit_within
+      index_commit_within: index_commit_within,
+      generate_csv: generate_csv
     })
     indexed_ontologies << acronym
   rescue Exception => e
@@ -300,6 +301,7 @@ begin
   bulk_reindex = options[:all] || options[:refresh_all]
   index_commit = !bulk_reindex
   index_commit_within = bulk_reindex ? nil : 30_000
+  generate_csv = !bulk_reindex
 
   time = Benchmark.realtime do
     if options[:promote_only]
@@ -319,7 +321,7 @@ begin
     end
 
     options[:ontologies].each do |acronym|
-      index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit)
+      index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv)
       remaining_ontologies -= 1
       logger.info("There is a total of #{remaining_ontologies} ontolog#{remaining_ontologies > 1 ? "ies" : "y"} remaining out of #{options[:ontologies].length} ontologies") if (remaining_ontologies > 0)
     end
