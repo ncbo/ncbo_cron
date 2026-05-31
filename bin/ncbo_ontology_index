@@ -41,7 +41,7 @@ opt_parser = OptionParser.new do |opts|
     options[:selected_ontologies] = true
   end
 
-  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the index after the indexing completion. Default: true') do |optimize|
+  opts.on('-z', '--optimize [true/false]', 'Whether to force a Solr optimize after indexing. Default: false (modern Solr does not need force-optimize; opt in only when needed).') do |optimize|
     options[:optimize] = optimize
   end
 
@@ -119,10 +119,10 @@ if !options[:promote_only] && options[:ontologies].empty?
   exit(1)
 end
 
-if options[:optimize].nil? || options[:optimize] != "false"
-  options[:optimize] = true
-else
+if options[:optimize].nil? || options[:optimize].to_s.downcase == "false"
   options[:optimize] = false
+else
+  options[:optimize] = true
 end
 
 def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv)
