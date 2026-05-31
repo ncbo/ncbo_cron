@@ -125,7 +125,7 @@ else
   options[:optimize] = true
 end
 
-def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv)
+def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv, unindex_existing)
   begin
     ont = LinkedData::Models::Ontology.find(acronym).first
 
@@ -147,7 +147,8 @@ def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, ind
       index_search: true,
       index_commit: index_commit,
       index_commit_within: index_commit_within,
-      generate_csv: generate_csv
+      generate_csv: generate_csv,
+      unindex_existing: unindex_existing
     })
     indexed_ontologies << acronym
   rescue Exception => e
@@ -302,6 +303,9 @@ begin
   index_commit = !bulk_reindex
   index_commit_within = bulk_reindex ? nil : 30_000
   generate_csv = !bulk_reindex
+  # -a clears the target collection up front, so per-ontology unindex_by_acronym
+  # is wasted work. --refresh-all reuses an existing collection and still needs it.
+  unindex_existing = !options[:all]
 
   time = Benchmark.realtime do
     if options[:promote_only]
@@ -321,7 +325,7 @@ begin
     end
 
     options[:ontologies].each do |acronym|
-      index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv)
+      index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv, unindex_existing)
       remaining_ontologies -= 1
       logger.info("There is a total of #{remaining_ontologies} ontolog#{remaining_ontologies > 1 ? "ies" : "y"} remaining out of #{options[:ontologies].length} ontologies") if (remaining_ontologies > 0)
     end
