@@ -148,7 +148,8 @@ def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, ind
       index_commit: index_commit,
       index_commit_within: index_commit_within,
       generate_csv: generate_csv,
-      unindex_existing: unindex_existing
+      unindex_existing: unindex_existing,
+      skip_refresh_report: true
     })
     indexed_ontologies << acronym
   rescue Exception => e
@@ -328,6 +329,15 @@ begin
       index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv, unindex_existing)
       remaining_ontologies -= 1
       logger.info("There is a total of #{remaining_ontologies} ontolog#{remaining_ontologies > 1 ? "ies" : "y"} remaining out of #{options[:ontologies].length} ontologies") if (remaining_ontologies > 0)
+    end
+
+    if indexed_ontologies.any?
+      logger.info("Refreshing ontologies report for #{indexed_ontologies.length} indexed ontolog#{indexed_ontologies.length > 1 ? "ies" : "y"}...")
+      logger.flush
+      t0 = Time.now
+      NcboCron::Models::OntologiesReport.new(logger).refresh_report(indexed_ontologies)
+      logger.info("Ontologies report refresh complete in #{Time.now - t0} sec.")
+      logger.flush
     end
 
     if bulk_reindex
