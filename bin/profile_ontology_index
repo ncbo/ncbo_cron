@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# DEV PROFILING HELPER -- not part of the indexing pipeline, not for production.
+#
+# Profiles the CPU cost of term indexing for ONE ontology, to find where the
+# per-class time goes (the fetch + map_attributes/indexable_object work that
+# dominates indexing). It calls the indexer's private `index` directly and
+# stubs every write path, so this run is effectively READ-ONLY:
+#   * Solr writes (index_document / index_commit) are stubbed to no-ops -- it
+#     never writes to, commits, or creates any Solr collection.
+#   * unindex_existing: false  -> no delete-by-acronym.
+#   * It bypasses process_indexation, so the submission status is NOT changed
+#     and @submission.save (and its ontology_metadata after-save callback) does
+#     NOT run.
+# Class data is read from the triplestore via SPARQL; those reads are unaffected.
+#
+# Usage:
+#   bundle exec ruby bin/profile_ontology_index ACRONYM
+#
+# Env:
+#   STACKPROF_MODE  cpu (default) | wall | object
+#                   cpu  -> on-CPU Ruby hotspots (best for the mapping cost)
+#                   wall -> includes I/O waits (shows SPARQL fetch time too)
+#   STACKPROF_OUT   dump path (default: tmp/stackprof-<ACRONYM>-<mode>.dump)
+#
+# After it runs it prints the top methods by self time and writes a dump:
+#   bundle exec stackprof <dump> --text
+#   bundle exec stackprof <dump> --d3-flamegraph > <dump>.html
+
+require 'bundler/setup'
+require 'logger'
+require 'fileutils'
+require 'stackprof'
+
+require_relative '../lib/ncbo_cron'
+config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+abort('Please create a config/config.rb file using config/config.rb.sample as a template') unless config_exists
+require_relative '../config/config'
+
+acronym = ARGV[0]
+abort('Usage: bundle exec ruby bin/profile_ontology_index ACRONYM') if acronym.nil? || acronym.strip.empty?
+
+mode = (ENV['STACKPROF_MODE'] || 'cpu').to_sym
+FileUtils.mkdir_p('tmp')
+out = ENV['STACKPROF_OUT'] || "tmp/stackprof-#{acronym}-#{mode}.dump"
+
+logger = Logger.new($stdout)
+
+ont = LinkedData::Models::Ontology.find(acronym).first
+abort("Ontology not found: #{acronym}") if ont.nil?
+sub = ont.latest_submission(status: :rdf)
+abort("No latest submission with RDF parsed status for #{acronym}") if sub.nil?
+
+# Stub the Solr write path so this profiling run can never touch a collection.
+# Indexing only WRITES through search_client (index_document / index_commit);
+# reads come from the triplestore via SPARQL, so they are unaffected. Both the
+# Class and ProvisionalClass models index into term_search, so stub both.
+noop = Object.new
+def noop.index_document(*_args, **_kw); end
+def noop.index_commit(*_args); end
+[LinkedData::Models::Class, LinkedData::Models::ProvisionalClass].each do |klass|
+  klass.define_singleton_method(:search_client) { |*| noop }
+end
+
+logger.info("Profiling term indexing for #{acronym} (StackProf mode=#{mode}); all Solr writes are stubbed out.")
+
+indexer = LinkedData::Services::OntologySubmissionIndexer.new(sub)
+
+StackProf.run(mode: mode, raw: true, out: out) do
+  # Call the private index loop directly: exercises fetch + map + (no-op) write,
+  # without the status-save wrapper in process_indexation.
+  indexer.send(:index, logger,
+               commit: false,
+               optimize: false,
+               commit_within: nil,
+               generate_csv: false,
+               unindex_existing: false)
+end
+
+report = StackProf::Report.new(Marshal.load(File.binread(out)))
+puts "\n\n===== StackProf top methods by self time (mode=#{mode}) ====="
+report.print_text(false, 30)
+puts "\nDump written to #{out}"
+puts "Explore:    bundle exec stackprof #{out} --text"
+puts "Flamegraph: bundle exec stackprof #{out} --d3-flamegraph > #{out}.html"

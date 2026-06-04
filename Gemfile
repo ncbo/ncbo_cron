@@ -32,6 +32,7 @@ gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'fi
 
 group :development do
   gem 'rubocop', require: false
+  gem 'stackprof', require: false
 end
 
 group :test do
