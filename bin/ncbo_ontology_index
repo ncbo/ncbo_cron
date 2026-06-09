@@ -41,7 +41,7 @@ opt_parser = OptionParser.new do |opts|
     options[:selected_ontologies] = true
   end
 
-  opts.on('-z', '--optimize [true/false]', 'Whether to optimize the index after the indexing completion. Default: true') do |optimize|
+  opts.on('-z', '--optimize [true/false]', 'Whether to force a Solr optimize after indexing. Default: false (modern Solr does not need force-optimize; opt in only when needed).') do |optimize|
     options[:optimize] = optimize
   end
 
@@ -119,13 +119,13 @@ if !options[:promote_only] && options[:ontologies].empty?
   exit(1)
 end
 
-if options[:optimize].nil? || options[:optimize] != "false"
-  options[:optimize] = true
-else
+if options[:optimize].nil? || options[:optimize].to_s.downcase == "false"
   options[:optimize] = false
+else
+  options[:optimize] = true
 end
 
-def index_ontology(indexed_ontologies, acronym, logger)
+def index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv, unindex_existing)
   begin
     ont = LinkedData::Models::Ontology.find(acronym).first
 
@@ -143,7 +143,14 @@ def index_ontology(indexed_ontologies, acronym, logger)
     end
     # NOTE: process_submission controls all aspects of re-indexing, including
     # removal of the old index and committing a new index.  There is no 'dry-run' option.
-    NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {index_search: true})
+    NcboCron::Models::OntologySubmissionParser.new.process_submission(logger, sub.id.to_s, {
+      index_search: true,
+      index_commit: index_commit,
+      index_commit_within: index_commit_within,
+      generate_csv: generate_csv,
+      unindex_existing: unindex_existing,
+      skip_refresh_report: true
+    })
     indexed_ontologies << acronym
   rescue Exception => e
     raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
@@ -293,6 +300,13 @@ begin
 
   indexed_ontologies = []
   remaining_ontologies = options[:ontologies]&.length.to_i
+  bulk_reindex = options[:all] || options[:refresh_all]
+  index_commit = !bulk_reindex
+  index_commit_within = bulk_reindex ? nil : 30_000
+  generate_csv = !bulk_reindex
+  # -a clears the target collection up front, so per-ontology unindex_by_acronym
+  # is wasted work. --refresh-all reuses an existing collection and still needs it.
+  unindex_existing = !options[:all]
 
   time = Benchmark.realtime do
     if options[:promote_only]
@@ -312,9 +326,27 @@ begin
     end
 
     options[:ontologies].each do |acronym|
-      index_ontology(indexed_ontologies, acronym, logger)
+      index_ontology(indexed_ontologies, acronym, logger, index_commit_within, index_commit, generate_csv, unindex_existing)
       remaining_ontologies -= 1
       logger.info("There is a total of #{remaining_ontologies} ontolog#{remaining_ontologies > 1 ? "ies" : "y"} remaining out of #{options[:ontologies].length} ontologies") if (remaining_ontologies > 0)
+    end
+
+    if indexed_ontologies.any?
+      logger.info("Refreshing ontologies report for #{indexed_ontologies.length} indexed ontolog#{indexed_ontologies.length > 1 ? "ies" : "y"}...")
+      logger.flush
+      t0 = Time.now
+      NcboCron::Models::OntologiesReport.new(logger).refresh_report(indexed_ontologies)
+      logger.info("Ontologies report refresh complete in #{Time.now - t0} sec.")
+      logger.flush
+    end
+
+    if bulk_reindex
+      logger.info("Committing index on #{options[:solr_collection]} after bulk ontology indexing...")
+      logger.flush
+      t0 = Time.now
+      LinkedData::Models::Class.indexCommit()
+      logger.info("Completed bulk index commit in #{Time.now - t0} sec.")
+      logger.flush
     end
 
     if options[:optimize]
@@ -336,8 +368,10 @@ begin
         promote_skipped_due_to_failure = true
         logger.flush
       else
-        logger.info("Committing index on #{options[:solr_collection]} before alias promotion...")
-        LinkedData::Models::Class.indexCommit(nil, :term_search)
+        unless bulk_reindex
+          logger.info("Committing index on #{options[:solr_collection]} before alias promotion...")
+          LinkedData::Models::Class.indexCommit(nil, :term_search)
+        end
         logger.info("Promoting active term search alias #{active_alias_name} to #{options[:solr_collection]}...")
         Goo.promote_search_alias(:term_search, options[:solr_collection].to_sym, alias_name: active_alias_name.to_sym)
         logger.info("Completed promoting active term search alias #{active_alias_name} to #{options[:solr_collection]}.")

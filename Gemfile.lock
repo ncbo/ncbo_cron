@@ -8,8 +8,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/goo.git
-  revision: 28329ce66ca724ba3652576938e9dc219ca496bf
-  branch: development
+  revision: b29803964525efb1e9f8f77f06ca26973154e14c
+  branch: fix/incorrect-search-result-ranking
   specs:
     goo (0.0.2)
       addressable (~> 2.8)
@@ -37,8 +37,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: 08aa39838cd592df0e45525f784bfa0fb45d3a8d
-  branch: develop
+  revision: 7f1302fd7cd0661a6f5d76dd7839ef0070cfb92b
+  branch: fix/incorrect-search-result-ranking
   specs:
     ontologies_linked_data (0.0.1)
       activesupport
@@ -438,6 +438,7 @@ GEM
       simplecov (~> 0.19)
     simplecov-html (0.13.2)
     simplecov_json_formatter (0.1.4)
+    stackprof (0.2.28)
     sys-proctable (1.3.0)
       ffi (~> 1.1)
     systemu (2.6.5)
@@ -502,6 +503,7 @@ DEPENDENCIES
   simplecov
   simplecov-cobertura
   sparql-client!
+  stackprof
   sys-proctable
   webmock (~> 3.25)
 
@@ -663,6 +665,7 @@ CHECKSUMS
   simplecov-html (0.13.2) sha256=bd0b8e54e7c2d7685927e8d6286466359b6f16b18cb0df47b508e8d73c777246
   simplecov_json_formatter (0.1.4) sha256=529418fbe8de1713ac2b2d612aa3daa56d316975d307244399fa4838c601b428
   sparql-client (3.2.2)
+  stackprof (0.2.28) sha256=4ec2ace02f386012b40ca20ef80c030ad711831f59511da12e83b34efb0f9a04
   sys-proctable (1.3.0) sha256=31f61ad79aa0d4412155132beadf2b7ca706a6badce4ad2dfeda5d1ca4916e54
   systemu (2.6.5) sha256=01f7d014b1453b28e5781e15c4d7d63fc9221c29b174b7aae5253207a75ab33e
   time (0.4.2) sha256=f324e498c3bde9471d45a7d18f874c27980e9867aa5cfca61bebf52262bc3dab

@@ -184,7 +184,9 @@ module NcboCron
           else
             multi_logger.error "Submission #{submission_id} parsing failed"
           end
-          NcboCron::Models::OntologiesReport.new(multi_logger).refresh_report([sub.ontology.acronym])
+          unless actions[:skip_refresh_report]
+            NcboCron::Models::OntologiesReport.new(multi_logger).refresh_report([sub.ontology.acronym])
+          end
         else
           multi_logger.error "Submission #{submission_id} is not in the system. Processing cancelled..."
         end
