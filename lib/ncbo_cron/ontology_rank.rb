@@ -48,6 +48,10 @@ module NcboCron
           logger.info('Storing rankings in Redis...')
           redis.set(ONTOLOGY_RANK_REDIS_FIELD, Marshal.dump(ontology_rank))
           logger.info('Rankings successfully stored in Redis')
+
+          logger.info('Propagating rankings to Solr term_search...')
+          updated = LinkedData::Services::RankSolrPropagator.new(logger: logger).propagate
+          logger.info("Propagated rankings to Solr for #{updated} ontologies")
         end
 
         logger.info("Finished generating ontology rankings in #{time.round(3)} seconds")
