@@ -37,8 +37,8 @@ GIT
 
 GIT
   remote: https://github.com/ncbo/ontologies_linked_data.git
-  revision: e559fe9cf97fb6c7fcc061420b1ecc652b6a3de5
-  branch: feature/rank-propagator
+  revision: c6f83eba9c21513c60977f93f93c6f08af958921
+  branch: develop
   specs:
     ontologies_linked_data (0.0.1)
       activesupport

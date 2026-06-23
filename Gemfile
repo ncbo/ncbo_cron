@@ -28,9 +28,7 @@ gem 'sys-proctable'
 gem 'goo', github: 'ncbo/goo', branch: 'development'
 gem 'sparql-client', github: 'ncbo/sparql-client', branch: 'development'
 gem 'ncbo_annotator', github: 'ncbo/ncbo_annotator', branch: 'develop'
-# TEMP: tracking the rank-propagator working branch for staging validation.
-# REVERT to branch: 'develop' before merging this PR (after feature/rank-propagator merges to OLD develop).
-gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'feature/rank-propagator'
+gem 'ontologies_linked_data', github: 'ncbo/ontologies_linked_data', branch: 'develop'
 
 group :development do
   gem 'rubocop', require: false
