@@ -115,6 +115,12 @@ module NcboCron
         new_sub.metrics = nil
         full_file_path = File.expand_path(file_location)
 
+        # Set it now: unzip_submission (via parsable?) would set it and save the unvalidated submission
+        if new_sub.zipped?(full_file_path)
+          archived_files = LinkedData::Utils::FileHelpers.filenames_in_archive(full_file_path)
+          new_sub.masterFileName = File.basename(archived_files.first) if archived_files.length == 1
+        end
+
         # check if OWLAPI is able to parse the file before creating a new submission
         if new_sub.parsable?(logger: logger)
           if new_sub.valid?

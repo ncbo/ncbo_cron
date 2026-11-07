@@ -21,7 +21,13 @@ end
 puts "Running on #{platform} platform"
 
 umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
-umls_files = Dir.glob(File.join(umls_files_path, "*.ttl"))
+
+Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
+  next if File.exist?("#{ttl}.gz")
+  puts "Compressing #{ttl} ..."
+  NcboCron::Models::UmlsSubmissionCompressor.gzip_file(ttl)
+end
+umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
 
 # UMLS Release Details.  Update this for new release
 new_version = "2023AB"
@@ -33,7 +39,7 @@ umls_files.each do |x|
   if not x["semantictypes"].nil?
     file_index["STY"] = x
   else
-    acr = x.split("/")[-1][0..-5]
+    acr = File.basename(x, ".ttl.gz")
     file_index[acr] = x
   end
 end
