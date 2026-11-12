@@ -143,7 +143,79 @@ class TestOntologyPull < TestCase
     assert Pony.deliveries.empty?
   end
 
+  def teardown
+    # The ontologies made for the create_submission tests would otherwise be
+    # swept by every later pull test
+    %w[CREATE-UMLS-0 CREATE-OWL-0].each do |acronym|
+      ont = LinkedData::Models::Ontology.find(acronym).include(:submissions).first
+      next if ont.nil?
+
+      ont.submissions.each(&:delete)
+      ont.delete
+    end
+    super
+  end
+
+  def test_create_submission_skips_owlapi_check_for_umls
+    ont, sub = init_ontology_for_create("UMLS")
+    LinkedData::Models::OntologySubmission.any_instance.expects(:parsable?).never
+
+    new_sub = create_submission_from_file(ont, sub)
+
+    assert_new_submission_saved(ont, new_sub)
+  end
+
+  def test_create_submission_checks_umls_with_owlapi_when_umls_parse_is_off
+    old_setting = LinkedData.settings.umls_owlapi_parse
+    LinkedData.settings.umls_owlapi_parse = false
+    ont, sub = init_ontology_for_create("UMLS")
+    # Off, this parse is what writes metrics.csv with the max depth
+    LinkedData::Models::OntologySubmission.any_instance.expects(:parsable?).once.returns(true)
+
+    new_sub = create_submission_from_file(ont, sub)
+
+    assert_new_submission_saved(ont, new_sub)
+  ensure
+    LinkedData.settings.umls_owlapi_parse = old_setting
+  end
+
+  def test_create_submission_checks_other_formats_with_owlapi
+    ont, sub = init_ontology_for_create("OWL")
+    LinkedData::Models::OntologySubmission.any_instance.expects(:parsable?).once.returns(false)
+
+    new_sub = create_submission_from_file(ont, sub)
+
+    refute new_sub.persistent?, "a file that fails the OWLAPI check must not become a submission"
+    ont = LinkedData::Models::Ontology.find(ont.id).include(:submissions).first
+    assert_equal 1, ont.submissions.length
+  end
+
   private
+
+  def init_ontology_for_create(format)
+    _ont_count, _acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
+      ont_count: 1, submission_count: 1, process_submission: false,
+      acronym: "CREATE-#{format}", ontology_format: format
+    )
+    ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:acronym, :submissions).first
+    sub = ont.submissions.first
+    sub.bring_remaining
+    assert sub.hasOntologyLanguage.id.to_s.end_with?(format)
+    [ont, sub]
+  end
+
+  def create_submission_from_file(ont, sub)
+    file_path = File.expand_path('../data/ontology_files/BRO_v3.2.owl', __FILE__)
+    # Not queued, so later tests that process the queue don't pick it up
+    NcboCron::Helpers::OntologyHelper.create_submission(ont, sub, file_path, File.basename(file_path),
+                                                        Logger.new(StringIO.new), false)
+  end
+
+  def assert_new_submission_saved(ont, new_sub)
+    assert new_sub.persistent?, "submission was not saved: #{new_sub.errors}"
+    ont = LinkedData::Models::Ontology.find(ont.id).include(:submissions).first
+    assert_equal 2, ont.submissions.length
+  end
 
   def init_ontologies(submission_count, process_submissions = false)
     ont_count, acronyms, ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(

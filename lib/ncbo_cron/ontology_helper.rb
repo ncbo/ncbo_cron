@@ -115,8 +115,14 @@ module NcboCron
         new_sub.metrics = nil
         full_file_path = File.expand_path(file_location)
 
+        # Set it now: unzip_submission (via parsable?) would set it and save the unvalidated submission
+        if new_sub.zipped?(full_file_path)
+          archived_files = LinkedData::Utils::FileHelpers.filenames_in_archive(full_file_path)
+          new_sub.masterFileName = File.basename(archived_files.first) if archived_files.length == 1
+        end
+
         # check if OWLAPI is able to parse the file before creating a new submission
-        if new_sub.parsable?(logger: logger)
+        if owlapi_checked_in_rdf_step?(new_sub) || new_sub.parsable?(logger: logger)
           if new_sub.valid?
             new_sub.save
 
@@ -129,13 +135,23 @@ module NcboCron
             logger.flush
           end
         else
-          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
+          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI")
           logger.error("A new submission has NOT been created.")
           logger.flush
           # delete the bad file
           File.delete full_file_path if File.exist? full_file_path
         end
         new_sub
+      end
+
+      # With umls_owlapi_parse on, the RDF step runs OWLAPI on UMLS submissions
+      # and fails on a file it cannot parse, so a parse here would only repeat
+      # it. Off, this parse is what writes the metrics.csv holding the max depth.
+      def self.owlapi_checked_in_rdf_step?(submission)
+        return false unless LinkedData.settings.umls_owlapi_parse
+
+        format = submission.hasOntologyLanguage
+        !format.nil? && format.umls?
       end
 
       def self.queue_submission(submission, actions={:all => true})
