@@ -57,8 +57,7 @@ module TestTmpFolder
 
       LinkedData.settings.repository_folder = repository_folder
       Annotator.settings.mgrep_dictionary_file = File.join(@path, 'dictionary.txt')
-      # An explicit REPORT_PATH from the environment wins.
-      NcboCron.settings.ontology_report_path = File.join(@path, 'ontologies_report.json') unless ENV.key?('REPORT_PATH')
+      NcboCron.settings.ontology_report_path = File.join(@path, 'ontologies_report.json')
 
       puts "(NC) >> Using temp test folder #{@path}"
     end
