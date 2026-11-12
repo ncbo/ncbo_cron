@@ -1,9 +1,12 @@
 require_relative 'test_case'
+require_relative 'support/processing_error_assertions'
 require 'json'
 require 'multi_json'
 require 'redis'
 
 class TestOntologySubmissionParser < TestCase
+  include ProcessingErrorAssertions
+
   def setup
     super
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
@@ -101,12 +104,12 @@ class TestOntologySubmissionParser < TestCase
     parser.queue_submission(o1_sub1, options_o1)
     parser.queue_submission(o2_sub1, options_o2)
 
-    parser.process_queue_submissions
+    assert_no_processing_errors { |logger| parser.process_queue_submissions(logger: logger) }
 
     parser.queue_submission(o1_sub2, options_o1)
     parser.queue_submission(o2_sub2, options_o2)
 
-    parser.process_queue_submissions
+    assert_no_processing_errors { |logger| parser.process_queue_submissions(logger: logger) }
 
     o1_sub1 = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(o1_sub1.id)).first
     o1_sub1.bring(:submissionStatus)
@@ -193,7 +196,7 @@ class TestOntologySubmissionParser < TestCase
 
     parser.queue_submission(o1_sub1, options_o1)
     parser.queue_submission(o2_sub1, options_o2)
-    parser.process_queue_submissions
+    assert_no_processing_errors { |logger| parser.process_queue_submissions(logger: logger) }
 
     o1_sub1 = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(o1_sub1.id)).first
     o1_sub1.bring(:submissionStatus)
@@ -206,6 +209,30 @@ class TestOntologySubmissionParser < TestCase
 
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "INDEXED"] - o1_sub1_statusCodes
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "ANNOTATOR"] - o2_sub1_statusCodes
+  end
+
+  def test_swallowed_processing_error_fails_the_check
+    parser = NcboCron::Models::OntologySubmissionParser.new
+    subs = @@ontologies.map do |ont|
+      ont.bring(:submissions)
+      ont.submissions.find { |x| x.id.to_s['/submissions/1'] }
+    end
+    subs.each { |sub| parser.queue_submission(sub, { process_rdf: true }) }
+    LinkedData::Models::OntologySubmission.any_instance.stubs(:process_submission)
+                                          .raises(StandardError, 'simulated processing failure')
+
+    logger = nil
+    failure = assert_raises(Minitest::Assertion) do
+      assert_no_processing_errors do |l|
+        logger = l
+        parser.process_queue_submissions(logger: l)
+      end
+    end
+
+    assert_match 'simulated processing failure', failure.message
+    # The daemon still logs the failure and moves on to the next queued submission
+    assert_equal subs.length, logger.errors.grep(/simulated processing failure/).length
+    assert_empty @@redis.hgetall(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER)
   end
 
 end

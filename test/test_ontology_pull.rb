@@ -1,8 +1,10 @@
 require_relative 'test_case'
+require_relative 'support/processing_error_assertions'
 require 'email_spec'
 
 class TestOntologyPull < TestCase
   include EmailSpec::Helpers
+  include ProcessingErrorAssertions
 
   def before_all
     super
@@ -19,6 +21,20 @@ class TestOntologyPull < TestCase
     end
 
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
+
+    # Processing writes the ontologies report and the annotator dictionary;
+    # writing either into a missing folder raises ENOENT
+    [NcboCron.settings.ontology_report_path, Annotator.settings.mgrep_dictionary_file].each do |path|
+      FileUtils.mkdir_p(File.dirname(path))
+    end
+  end
+
+  def setup
+    super
+    # Pulls queue the submissions they create. Left in the queue, they would be
+    # processed by a later test's process_queue_submissions after their
+    # ontology was recreated, and fail as "not in the system".
+    @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
   end
 
   def after_all
@@ -34,7 +50,7 @@ class TestOntologyPull < TestCase
     assert_equal 1, ont.submissions.length
 
     pull = NcboCron::Models::OntologyPull.new
-    pull.do_remote_ontology_pull
+    assert_no_processing_errors { |logger| pull.do_remote_ontology_pull(logger: logger) }
 
     # check that the pull creates a new submission when the file has changed
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
@@ -58,7 +74,7 @@ class TestOntologyPull < TestCase
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
     assert_equal 2, ont.submissions.length
-    pull.do_remote_ontology_pull
+    assert_no_processing_errors { |logger| pull.do_remote_ontology_pull(logger: logger) }
     assert_equal 2, ont.submissions.length
   end
 
@@ -74,7 +90,7 @@ class TestOntologyPull < TestCase
     actions = NcboCron::Models::OntologySubmissionParser::ACTIONS.dup
     actions[:remote_pull] = true
     parser.queue_submission(ont.submissions[0], actions)
-    parser.process_queue_submissions
+    assert_no_processing_errors { |logger| parser.process_queue_submissions(logger: logger) }
 
     # make sure there are now 2 submissions present
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
@@ -83,7 +99,7 @@ class TestOntologyPull < TestCase
 
     # verify that no new submission is created when the file has not changed
     parser.queue_submission(ont.submissions[0], actions)
-    parser.process_queue_submissions
+    assert_no_processing_errors { |logger| parser.process_queue_submissions(logger: logger) }
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
     assert_equal 2, ont.submissions.length
@@ -109,7 +125,7 @@ class TestOntologyPull < TestCase
     sub.save
 
     pull = NcboCron::Models::OntologyPull.new
-    pull.do_remote_ontology_pull
+    assert_no_processing_errors { |logger| pull.do_remote_ontology_pull(logger: logger) }
 
     assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
     user = ont.administeredBy[0]
@@ -139,7 +155,7 @@ class TestOntologyPull < TestCase
     # Check that we don't attempt to pull ontologies with no pull locations.
     reset_mailer
     pull = NcboCron::Models::OntologyPull.new
-    pull.do_remote_ontology_pull
+    assert_no_processing_errors { |logger| pull.do_remote_ontology_pull(logger: logger) }
     assert Pony.deliveries.empty?
   end
 
