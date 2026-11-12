@@ -129,7 +129,7 @@ module NcboCron
             logger.flush
           end
         else
-          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI: #{e.class}: #{e.message}\n#{e.backtrace.join("\n\t")}")
+          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI")
           logger.error("A new submission has NOT been created.")
           logger.flush
           # delete the bad file
