@@ -25,7 +25,7 @@ umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
 Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
   next if File.exist?("#{ttl}.gz")
   puts "Compressing #{ttl} ..."
-  NcboCron::Models::UmlsSubmissionCompressor.gzip_file(ttl)
+  LinkedData::Utils::FileHelpers.gzip_file(ttl)
 end
 umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
 
