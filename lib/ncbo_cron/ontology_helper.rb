@@ -115,14 +115,17 @@ module NcboCron
         new_sub.metrics = nil
         full_file_path = File.expand_path(file_location)
 
-        # Set it now: unzip_submission (via parsable?) would set it and save the unvalidated submission
-        if new_sub.zipped?(full_file_path)
-          archived_files = LinkedData::Utils::FileHelpers.filenames_in_archive(full_file_path)
-          new_sub.masterFileName = File.basename(archived_files.first) if archived_files.length == 1
+        # check if OWLAPI is able to parse the file before creating a new submission
+        parsable = begin
+          set_single_entry_master_file(new_sub, full_file_path)
+          owlapi_checked_in_rdf_step?(new_sub) || new_sub.parsable?(logger: logger)
+        rescue StandardError => e
+          # e.g. a corrupt archive, which fails while being unpacked rather than in OWLAPI
+          logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} could not be checked: #{e.class}: #{e.message}")
+          false
         end
 
-        # check if OWLAPI is able to parse the file before creating a new submission
-        if owlapi_checked_in_rdf_step?(new_sub) || new_sub.parsable?(logger: logger)
+        if parsable
           if new_sub.valid?
             new_sub.save
 
@@ -130,18 +133,30 @@ module NcboCron
               queue_submission(new_sub, { all: true })
               logger.info("OntologyPull created a new submission (#{submission_id}) for ontology #{ont.acronym}")
             end
-          else
-            logger.error("Unable to create a new submission for ontology #{ont.acronym} with id #{submission_id}: #{new_sub.errors}")
-            logger.flush
+            return new_sub
           end
+          logger.error("Unable to create a new submission for ontology #{ont.acronym} with id #{submission_id}: #{new_sub.errors}")
         else
+          # parsable? rescues the OWLAPI exception itself, so only the outcome is available here
           logger.error("The new file for ontology #{ont.acronym}, submission id: #{submission_id} did not clear OWLAPI")
-          logger.error("A new submission has NOT been created.")
-          logger.flush
-          # delete the bad file
-          File.delete full_file_path if File.exist? full_file_path
         end
-        new_sub
+
+        logger.error("A new submission has NOT been created.")
+        # Nothing was saved, so this submission's folder holds only what this attempt wrote:
+        # the downloaded file, unzipped/ and OWLAPI output.
+        FileUtils.rm_rf(File.dirname(full_file_path)) unless new_sub.persistent?
+        logger.flush
+        nil
+      end
+
+      # parsable? unpacks archives through unzip_submission, which saves the submission when it
+      # auto-sets masterFileName for a single-entry archive. Setting it here first keeps the
+      # parse check from persisting anything. Multi-entry archives are left as they were.
+      def self.set_single_entry_master_file(submission, file_path)
+        return unless submission.zipped?(file_path)
+
+        entries = LinkedData::Utils::FileHelpers.filenames_in_archive(file_path)
+        submission.masterFileName = entries.first if entries.length == 1
       end
 
       # With umls_owlapi_parse on, the RDF step runs OWLAPI on UMLS submissions

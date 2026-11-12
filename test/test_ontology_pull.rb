@@ -89,6 +89,95 @@ class TestOntologyPull < TestCase
     assert_equal 2, ont.submissions.length
   end
 
+  # The remote file downloads fine (HTTP 200) but its content fails OWLAPI parsing.
+  # Download failures (HTTP 404) are covered by test_pull_error_notification.
+  def test_remote_pull_unparsable_file
+    bad_url = 'http://ontology.example.test/unparsable.owl'
+    stub_request(:head, bad_url).to_return(status: 200)
+    stub_request(:get, bad_url).to_return(status: 200, body: 'this is not an ontology <<<')
+
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], bad_url)
+
+    log = StringIO.new
+    # Call the helper directly: do_remote_ontology_pull's catch-all rescue would hide any exception.
+    result = NcboCron::Helpers::OntologyHelper.do_ontology_pull(
+      acronym, logger: Logger.new(log), add_to_queue: false
+    )
+
+    # the download succeeded and OWLAPI itself rejected the file
+    assert_requested :get, bad_url, at_least_times: 1
+    assert_match %r{Java call \[.*owlapi-wrapper.*/#{acronym}/2/unparsable\.owl}, log.string
+    # owlapi-wrapper exits 0 on parse errors; the rejection shows up as its own error plus a missing owlapi.xrdf
+    assert_match %r{OntologyParser - Problem parsing file:.*/unparsable\.owl}, log.string
+    assert_match 'did not clear OWLAPI', log.string
+    assert_match 'A new submission has NOT been created.', log.string
+
+    assert_nil result, 'A rejected pull must not return a submission'
+    assert_equal 1, submission_count(ontologies[0])
+    refute Dir.exist?(submission_dir(acronym, 2)), 'The rejected submission folder should be removed'
+  end
+
+  # A gzip archive holding one unparsable file. unzip_submission (ontologies_linked_data) saves the
+  # submission when it auto-sets masterFileName, which happens before OWLAPI runs, so a failed parse
+  # must still leave no new submission behind. A second pull checks it doesn't pile up on every run.
+  def test_remote_pull_unparsable_gzip_file
+    bad_url = 'http://ontology.example.test/unparsable.owl.gz'
+    stub_request(:head, bad_url).to_return(status: 200)
+    stub_request(:get, bad_url).to_return(status: 200, body: gzip('this is not an ontology <<<'))
+
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], bad_url)
+
+    log = StringIO.new
+    results = []
+    submission_counts = 2.times.map do
+      results << NcboCron::Helpers::OntologyHelper.do_ontology_pull(
+        acronym, logger: Logger.new(log), add_to_queue: false
+      )
+      submission_count(ontologies[0])
+    end
+
+    # the archive was unpacked and OWLAPI itself rejected the payload
+    assert_match %r{Java call \[.*owlapi-wrapper.*/#{acronym}/2/unzipped}, log.string
+    assert_match %r{OntologyParser - Problem parsing file:.*/unzipped/}, log.string
+    assert_match 'did not clear OWLAPI', log.string
+
+    assert_equal [1, 1], submission_counts,
+                 'An unparsable pulled archive must not create a submission (counts after each of two pulls)'
+    assert_equal [nil, nil], results
+    refute Dir.exist?(submission_dir(acronym, 2)), 'The rejected submission folder should be removed'
+  end
+
+  # The success path for a single-entry archive: the master file is set up front, the
+  # submission is created once, and it is queued for processing.
+  def test_remote_pull_gzip_file
+    gz_url = 'http://ontology.example.test/BRO_v3.2.owl.gz'
+    stub_request(:head, gz_url).to_return(status: 200)
+    stub_request(:get, gz_url).to_return(status: 200, body: gzip(@@ontology_file_contents))
+
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], gz_url)
+    # other tests queue the same submission id
+    @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
+
+    new_sub = NcboCron::Helpers::OntologyHelper.do_ontology_pull(
+      acronym, logger: Logger.new(StringIO.new), add_to_queue: true
+    )
+
+    refute_nil new_sub
+    assert_equal 2, submission_count(ontologies[0])
+    new_sub = LinkedData::Models::OntologySubmission.find(new_sub.id).first
+    new_sub.bring_remaining
+    assert_equal 2, new_sub.submissionId
+    assert_equal 'BRO_v3.2.owl', new_sub.masterFileName
+    assert File.exist?(File.join(submission_dir(acronym, 2), 'unzipped', 'BRO_v3.2.owl'))
+
+    queue = NcboCron::Models::OntologySubmissionParser.new
+    assert @@redis.hget(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER,
+                        queue.get_prefixed_id(new_sub.id.to_s)), 'The new submission should be queued'
+  end
+
   def test_pull_error_notification
     error_url = 'http://ontology.example.test/404.owl'
     stub_remote_ontology_not_found(error_url)
@@ -185,7 +274,7 @@ class TestOntologyPull < TestCase
 
     new_sub = create_submission_from_file(ont, sub)
 
-    refute new_sub.persistent?, "a file that fails the OWLAPI check must not become a submission"
+    assert_nil new_sub, "a file that fails the OWLAPI check must not become a submission"
     ont = LinkedData::Models::Ontology.find(ont.id).include(:submissions).first
     assert_equal 1, ont.submissions.length
   end
@@ -228,6 +317,29 @@ class TestOntologyPull < TestCase
       sub.save rescue binding.pry
     end
     ontologies
+  end
+
+  def set_pull_location(ontology, url)
+    ont = LinkedData::Models::Ontology.find(ontology.id).include(:acronym, :submissions).first
+    sub = ont.submissions.first
+    sub.bring_remaining
+    sub.pullLocation = RDF::IRI.new(url)
+    sub.save
+    ont.acronym
+  end
+
+  def submission_count(ontology)
+    LinkedData::Models::Ontology.find(ontology.id).include(:submissions).first.submissions.length
+  end
+
+  def submission_dir(acronym, submission_id)
+    File.join(LinkedData.settings.repository_folder.to_s, acronym.to_s, submission_id.to_s)
+  end
+
+  def gzip(contents)
+    io = StringIO.new(''.b)
+    Zlib::GzipWriter.wrap(io) { |w| w.write(contents) }
+    io.string
   end
 
   def stub_remote_ontology_success(url)
