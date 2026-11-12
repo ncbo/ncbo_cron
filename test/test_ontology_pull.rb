@@ -21,12 +21,6 @@ class TestOntologyPull < TestCase
     end
 
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
-
-    # Processing writes the ontologies report and the annotator dictionary;
-    # writing either into a missing folder raises ENOENT
-    [NcboCron.settings.ontology_report_path, Annotator.settings.mgrep_dictionary_file].each do |path|
-      FileUtils.mkdir_p(File.dirname(path))
-    end
   end
 
   def setup
