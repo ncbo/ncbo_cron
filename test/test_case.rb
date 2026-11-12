@@ -117,6 +117,22 @@ class TestCase < Minitest::Test
 
   private
 
+  # Queue processing and pulls log a failed item and move on to the next one, so
+  # a test that only checks side effects can pass after a failure. Check the
+  # ProcessingFailures the run returns too.
+  def assert_no_processing_failures(failures)
+    assert_empty failures, "Processing failed:\n#{failures.join("\n")}"
+  end
+
+  # ontologies_linked_data records a failed processing step as an ERROR_* status
+  # on the submission
+  def assert_no_error_statuses(submission)
+    submission = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(submission.id.to_s))
+                                                       .include(:submissionStatus).first
+    codes = LinkedData::Models::SubmissionStatus.get_status_codes(submission.submissionStatus)
+    assert_empty codes.grep(/\AERROR/), "#{submission.id} has error statuses: #{codes.join(', ')}"
+  end
+
   def count_pattern(pattern)
     q = "SELECT (count(DISTINCT ?s) as ?c) WHERE { #{pattern} }"
     rs = Goo.sparql_query_client.query(q)

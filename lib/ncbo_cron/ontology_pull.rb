@@ -4,7 +4,22 @@ require_relative 'ontology_helper'
 module NcboCron
   module Models
     class OntologyPull
+      ProcessingFailure = NcboCron::Helpers::OntologyHelper::ProcessingFailure
+
+      # The ProcessingFailures from the last do_remote_ontology_pull run: unexpected
+      # errors while pulling an ontology, and failed notifications. A missing remote
+      # file is reported to the ontology's admins and is not a failure here.
+      attr_reader :failures
+
+      def initialize
+        @failures = []
+      end
+
+      # Pulls every ontology that has a pull location. A failed ontology is logged
+      # and the run moves on to the next one; see #failures for what went wrong.
+      # Returns the new submissions.
       def do_remote_ontology_pull(options = {})
+        @failures = []
         logger = options[:logger] || Logger.new($stdout)
         logger.flush
         ontologies = LinkedData::Models::Ontology.where.include(:acronym).all
@@ -26,6 +41,8 @@ module NcboCron
             LinkedData::Utils::Notifications.remote_ontology_pull(e.submission)
           rescue StandardError => notify_err
             logger.error("Notification failed: #{notify_err.class} - #{notify_err.message}")
+            @failures << ProcessingFailure.new(item: ont.acronym, message: 'Pull failure notification failed',
+                                               error: notify_err)
           end
         rescue NcboCron::Helpers::OntologyHelper::MissingPullLocationException => e
           logger.warn("Skipping #{e.acronym}: no pullLocation defined.")
@@ -33,6 +50,7 @@ module NcboCron
           logger.warn("Skipping #{e.acronym}: no submission found.")
         rescue StandardError => e
           logger.error("Unexpected error during pull of #{ont.acronym}: #{e.class} - #{e.message}")
+          @failures << ProcessingFailure.new(item: ont.acronym, message: 'Unexpected error during pull', error: e)
         end
         if options[:cache_clear] == true
           logger.info('Clearing Goo/HTTP caches...')
