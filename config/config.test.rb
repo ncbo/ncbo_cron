@@ -12,7 +12,6 @@ MGREP_DICT_PATH   = ENV.include?('MGREP_DICT_PATH')   ? ENV['MGREP_DICT_PATH']  
 REDIS_HOST        = ENV.include?('REDIS_HOST')        ? ENV['REDIS_HOST']        : 'localhost'
 REDIS_PORT        = ENV.include?('REDIS_PORT')        ? ENV['REDIS_PORT']        : 6379
 SEARCH_SERVER_URL = ENV.include?('SEARCH_SERVER_URL') ? ENV['SEARCH_SERVER_URL'] : 'http://localhost:8983/solr'
-REPORT_PATH       = ENV.include?('REPORT_PATH')       ? ENV['REPORT_PATH']       : './test/tmp/ontologies_report.json'
 
 LinkedData.config do |config|
   config.goo_backend_name              = GOO_BACKEND_NAME.to_s
@@ -47,5 +46,5 @@ NcboCron.config do |config|
   config.redis_port = REDIS_PORT.to_s
   # Full reindex jobs use the LinkedData search_server_url base URL above and
   # select the physical target collection via the cron CLI.
-  config.ontology_report_path = REPORT_PATH
+  # ontology_report_path is set to a per-run temp folder in test/test_case.rb.
 end

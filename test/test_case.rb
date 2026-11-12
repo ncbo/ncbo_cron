@@ -32,6 +32,62 @@ unless ENV['RM_INFO']
 end
 
 Goo.use_cache = false # Make sure tests don't cache
+
+require 'tmpdir'
+require 'fileutils'
+
+# One scratch folder per test process for everything the tests write: the
+# ontology repository (uploaded files, parsing.log, owlapi output, metrics,
+# diffs), the ontologies report and the annotator dictionary. A fresh folder
+# per run means no state leaks in from earlier runs.
+#
+# The folder is removed after a passing run and kept after a failing one, so
+# its logs can be inspected. KEEP_TEST_REPOSITORY_FOLDER=true keeps it after a
+# passing run too. Set TMPDIR to choose where it's created.
+module TestTmpFolder
+  class << self
+    attr_reader :path
+
+    def setup
+      return if @path
+
+      @path = Dir.mktmpdir('ncbo_cron-test-')
+      repository_folder = File.join(@path, 'repo')
+      FileUtils.mkdir_p(repository_folder)
+
+      LinkedData.settings.repository_folder = repository_folder
+      Annotator.settings.mgrep_dictionary_file = File.join(@path, 'dictionary.txt')
+      NcboCron.settings.ontology_report_path = File.join(@path, 'ontologies_report.json')
+
+      puts "(NC) >> Using temp test folder #{@path}"
+    end
+
+    def teardown(passed:)
+      return unless @path
+
+      if !passed
+        puts "(NC) >> Tests did not pass; keeping temp test folder #{@path}"
+      elsif ENV['KEEP_TEST_REPOSITORY_FOLDER'] == 'true'
+        puts "(NC) >> Keeping temp test folder #{@path}"
+      else
+        FileUtils.remove_entry(@path)
+      end
+      @path = nil
+    end
+  end
+
+  module RunHook
+    def run(*args)
+      TestTmpFolder.setup
+      passed = super
+    ensure
+      # passed is nil if the run raised, which also keeps the folder.
+      TestTmpFolder.teardown(passed: passed)
+    end
+  end
+end
+
+Minitest.singleton_class.prepend(TestTmpFolder::RunHook)
 # Check to make sure you want to run if not pointed at localhost
 safe_host = Regexp.new(/localhost|-ut/)
 unless LinkedData.settings.goo_host.match(safe_host) &&

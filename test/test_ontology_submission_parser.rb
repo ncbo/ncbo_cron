@@ -22,12 +22,6 @@ class TestOntologySubmissionParser < TestCase
       return
     end
 
-    # For annotator dict creation
-    tmp_folder = './test/tmp/'
-    if not Dir.exist? tmp_folder
-      FileUtils.mkdir_p tmp_folder
-    end
-
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
 
     @@ont_count, @@acronyms, @@ontologies = LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
