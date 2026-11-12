@@ -116,7 +116,7 @@ module NcboCron
         full_file_path = File.expand_path(file_location)
 
         # check if OWLAPI is able to parse the file before creating a new submission
-        if new_sub.parsable?(logger: logger)
+        if owlapi_checked_in_rdf_step?(new_sub) || new_sub.parsable?(logger: logger)
           if new_sub.valid?
             new_sub.save
 
@@ -136,6 +136,16 @@ module NcboCron
           File.delete full_file_path if File.exist? full_file_path
         end
         new_sub
+      end
+
+      # With umls_owlapi_parse on, the RDF step runs OWLAPI on UMLS submissions
+      # and fails on a file it cannot parse, so a parse here would only repeat
+      # it. Off, this parse is what writes the metrics.csv holding the max depth.
+      def self.owlapi_checked_in_rdf_step?(submission)
+        return false unless LinkedData.settings.umls_owlapi_parse
+
+        format = submission.hasOntologyLanguage
+        !format.nil? && format.umls?
       end
 
       def self.queue_submission(submission, actions={:all => true})
