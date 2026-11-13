@@ -98,6 +98,7 @@ class TestOntologyPull < TestCase
 
     ontologies = init_ontologies(1)
     acronym = set_pull_location(ontologies[0], bad_url)
+    clear_submission_dir(acronym, 2)
 
     log = StringIO.new
     # Call the helper directly: do_remote_ontology_pull's catch-all rescue would hide any exception.
@@ -128,6 +129,7 @@ class TestOntologyPull < TestCase
 
     ontologies = init_ontologies(1)
     acronym = set_pull_location(ontologies[0], bad_url)
+    clear_submission_dir(acronym, 2)
 
     log = StringIO.new
     results = []
@@ -176,6 +178,62 @@ class TestOntologyPull < TestCase
     queue = NcboCron::Models::OntologySubmissionParser.new
     assert @@redis.hget(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER,
                         queue.get_prefixed_id(new_sub.id.to_s)), 'The new submission should be queued'
+  end
+
+  # Another pull of the same ontology holds the lock: this one skips it without downloading,
+  # and leaves the other pull's lock alone. Once the lock is free, the pull runs and releases it.
+  def test_pull_skips_ontology_already_being_pulled
+    url = 'http://ontology.example.test/locked.owl'
+    stub_remote_ontology_success(url)
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], url)
+    lock_key = "#{NcboCron::Helpers::OntologyHelper::PULL_LOCK_PREFIX}#{acronym}"
+    @@redis.set(lock_key, 'another-pull')
+
+    assert_nil pull(acronym)
+    assert_not_requested :get, url
+    assert_equal 1, submission_count(ontologies[0])
+    assert_equal 'another-pull', @@redis.get(lock_key), 'A skipped pull must not release a lock it does not own'
+
+    @@redis.del(lock_key)
+    refute_nil pull(acronym), 'The pull should run once the lock is free'
+    assert_equal 2, submission_count(ontologies[0])
+    assert_nil @@redis.get(lock_key), 'A pull should release its lock when it finishes'
+  ensure
+    @@redis.del(lock_key) if lock_key
+  end
+
+  # A rejected pull removes only a folder it created: one that was already there is left alone.
+  def test_rejected_pull_keeps_folder_it_did_not_create
+    url = 'http://ontology.example.test/unparsable-existing-folder.owl'
+    stub_request(:head, url).to_return(status: 200)
+    stub_request(:get, url).to_return(status: 200, body: 'this is not an ontology <<<')
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], url)
+    leftover = File.join(submission_dir(acronym, 2), 'leftover.txt')
+    FileUtils.mkdir_p(File.dirname(leftover))
+    File.write(leftover, 'left by an earlier submission 2')
+
+    assert_nil pull(acronym)
+    assert_equal 1, submission_count(ontologies[0])
+    assert File.exist?(leftover), 'A folder that existed before the pull must not be removed'
+  end
+
+  # Two pulls of one ontology pick the same submission id; the second fails validation as a
+  # duplicate and must not remove the folder of the submission the first one saved.
+  def test_rejected_pull_keeps_folder_of_saved_submission
+    url = 'http://ontology.example.test/duplicate-id.owl'
+    stub_remote_ontology_success(url)
+    ontologies = init_ontologies(1)
+    acronym = set_pull_location(ontologies[0], url)
+    # Simulate the race: the next id is the one an existing submission already holds. Its folder
+    # is gone, so this pull creates it, as the losing pull of a race would.
+    LinkedData::Models::Ontology.any_instance.stubs(:next_submission_id).returns(1)
+    FileUtils.rm_rf(submission_dir(acronym, 1))
+
+    assert_nil pull(acronym)
+    assert_equal 1, submission_count(ontologies[0])
+    assert Dir.exist?(submission_dir(acronym, 1)), 'The saved submission\'s folder must not be removed'
   end
 
   def test_pull_error_notification
@@ -328,12 +386,22 @@ class TestOntologyPull < TestCase
     ont.acronym
   end
 
+  def pull(acronym)
+    NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym, logger: Logger.new(StringIO.new), add_to_queue: false)
+  end
+
   def submission_count(ontology)
     LinkedData::Models::Ontology.find(ontology.id).include(:submissions).first.submissions.length
   end
 
   def submission_dir(acronym, submission_id)
     File.join(LinkedData.settings.repository_folder.to_s, acronym.to_s, submission_id.to_s)
+  end
+
+  # Teardown deletes submissions but not their folders, so an earlier test can leave this
+  # one behind. A rejected pull keeps a folder it didn't create, so start without it.
+  def clear_submission_dir(acronym, submission_id)
+    FileUtils.rm_rf(submission_dir(acronym, submission_id))
   end
 
   def gzip(contents)
