@@ -95,12 +95,12 @@ class TestOntologySubmissionParser < TestCase
     parser.queue_submission(o1_sub1, options_o1)
     parser.queue_submission(o2_sub1, options_o2)
 
-    parser.process_queue_submissions
+    assert_no_processing_failures parser.process_queue_submissions
 
     parser.queue_submission(o1_sub2, options_o1)
     parser.queue_submission(o2_sub2, options_o2)
 
-    parser.process_queue_submissions
+    assert_no_processing_failures parser.process_queue_submissions
 
     o1_sub1 = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(o1_sub1.id)).first
     o1_sub1.bring(:submissionStatus)
@@ -121,6 +121,8 @@ class TestOntologySubmissionParser < TestCase
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "INDEXED", "INDEXED_PROPERTIES", "DIFF"] - o1_sub2_statusCodes
     assert_equal [], ["ARCHIVED"] - o2_sub1_statusCodes
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "ANNOTATOR", "DIFF"] - o2_sub2_statusCodes
+    assert_no_error_statuses o1_sub2
+    assert_no_error_statuses o2_sub2
 
     archived_submissions << o1_sub1
     archived_submissions << o2_sub1
@@ -187,7 +189,7 @@ class TestOntologySubmissionParser < TestCase
 
     parser.queue_submission(o1_sub1, options_o1)
     parser.queue_submission(o2_sub1, options_o2)
-    parser.process_queue_submissions
+    assert_no_processing_failures parser.process_queue_submissions
 
     o1_sub1 = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(o1_sub1.id)).first
     o1_sub1.bring(:submissionStatus)
@@ -200,6 +202,82 @@ class TestOntologySubmissionParser < TestCase
 
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "INDEXED"] - o1_sub1_statusCodes
     assert_equal [], ["UPLOADED", "RDF", "RDF_LABELS", "ANNOTATOR"] - o2_sub1_statusCodes
+    assert_no_error_statuses o1_sub1
+    assert_no_error_statuses o2_sub1
+  end
+
+  def test_processing_exception_is_reported_and_the_queue_moves_on
+    parser = NcboCron::Models::OntologySubmissionParser.new
+    subs = first_submissions
+    subs.each { |sub| parser.queue_submission(sub, { process_rdf: true }) }
+    LinkedData::Models::OntologySubmission.any_instance.stubs(:process_submission)
+                                          .raises(StandardError, 'simulated processing failure')
+
+    failures = parser.process_queue_submissions(logger: Logger.new(StringIO.new))
+
+    assert_equal subs.map { |sub| sub.id.to_s }.sort, failures.map(&:item).sort
+    assert(failures.all? { |f| f.error.message == 'simulated processing failure' }, failures.join("\n"))
+    assert_equal failures, parser.failures
+    assert_empty @@redis.hgetall(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER)
+  end
+
+  def test_remote_pull_exception_is_reported_and_the_queue_moves_on
+    parser = NcboCron::Models::OntologySubmissionParser.new
+    subs = first_submissions
+    subs.each { |sub| parser.queue_submission(sub, { remote_pull: true, process_rdf: true }) }
+    NcboCron::Helpers::OntologyHelper.stubs(:do_ontology_pull).raises(StandardError, 'simulated pull failure')
+
+    failures = parser.process_queue_submissions(logger: Logger.new(StringIO.new))
+
+    # Each queued item is pulled and fails on its own, instead of the first
+    # failure ending the run
+    assert_equal subs.length, failures.length
+    assert(failures.all? { |f| f.error.message == 'simulated pull failure' }, failures.join("\n"))
+    assert_empty @@redis.hgetall(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER)
+  end
+
+  def test_invalid_queue_record_is_reported
+    key = 'sub:http://data.bioontology.org/ontologies/BAD-RECORD/submissions/1'
+    @@redis.hset(NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER, key, '{not json')
+    parser = NcboCron::Models::OntologySubmissionParser.new
+
+    failures = parser.process_queue_submissions(logger: Logger.new(StringIO.new))
+
+    assert_equal [key], failures.map(&:item)
+    assert_equal 'Invalid record in the parse queue', failures.first.message
+  end
+
+  def test_missing_submission_is_reported
+    submission_id = 'http://data.bioontology.org/ontologies/NOT-THERE/submissions/1'
+    parser = NcboCron::Models::OntologySubmissionParser.new
+
+    failures = parser.process_submission(Logger.new(StringIO.new), submission_id, { process_rdf: true })
+
+    assert_equal [submission_id], failures.map(&:item)
+    assert_equal 'Submission is not in the system', failures.first.message
+  end
+
+  def test_annotator_failure_is_reported
+    sub = first_submissions.first
+    sub.stubs(:ready?).returns(true)
+    Annotator::Models::NcboAnnotator.any_instance.stubs(:create_term_cache_for_submission)
+                                    .raises(StandardError, 'simulated annotator failure')
+    parser = NcboCron::Models::OntologySubmissionParser.new
+
+    failure = parser.send(:process_annotator, Logger.new(StringIO.new), sub)
+
+    assert_equal sub.id.to_s, failure.item
+    assert_equal 'Annotator update failed', failure.message
+    assert_equal 'simulated annotator failure', failure.error.message
+  end
+
+  private
+
+  def first_submissions
+    @@ontologies.map do |ont|
+      ont.bring(:submissions)
+      ont.submissions.find { |sub| sub.id.to_s.end_with?('/submissions/1') }
+    end
   end
 
 end

@@ -18,6 +18,13 @@ class TestOntologyPull < TestCase
       return
     end
 
+  end
+
+  def setup
+    super
+    # Pulls queue the submissions they create. Left in the queue, a later test's
+    # process_queue_submissions would process them after their ontology was
+    # recreated, and fail as not in the system.
     @@redis.del NcboCron::Models::OntologySubmissionParser::QUEUE_HOLDER
   end
 
@@ -35,6 +42,7 @@ class TestOntologyPull < TestCase
 
     pull = NcboCron::Models::OntologyPull.new
     pull.do_remote_ontology_pull
+    assert_no_processing_failures pull.failures
 
     # check that the pull creates a new submission when the file has changed
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
@@ -58,7 +66,16 @@ class TestOntologyPull < TestCase
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
     assert_equal 2, ont.submissions.length
+
+    # Serve the file the latest submission already has. The sample data uploads
+    # ontologies_linked_data's BRO_v3.2.owl, which differs from this repo's copy.
+    latest = ont.latest_submission(status: :any)
+    latest.bring(:uploadFilePath)
+    stub_request(:get, @@url).to_return(status: 200, body: File.binread(latest.uploadFilePath))
+
     pull.do_remote_ontology_pull
+    assert_no_processing_failures pull.failures
+    ont = LinkedData::Models::Ontology.find(ontologies[0].id).include(:submissions).first
     assert_equal 2, ont.submissions.length
   end
 
@@ -74,16 +91,17 @@ class TestOntologyPull < TestCase
     actions = NcboCron::Models::OntologySubmissionParser::ACTIONS.dup
     actions[:remote_pull] = true
     parser.queue_submission(ont.submissions[0], actions)
-    parser.process_queue_submissions
+    assert_no_processing_failures parser.process_queue_submissions
 
     # make sure there are now 2 submissions present
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
     assert_equal 2, ont.submissions.length
+    assert_no_error_statuses ont.latest_submission(status: :any)
 
     # verify that no new submission is created when the file has not changed
     parser.queue_submission(ont.submissions[0], actions)
-    parser.process_queue_submissions
+    assert_no_processing_failures parser.process_queue_submissions
     ont = LinkedData::Models::Ontology.find(ontologies[0].id).first
     ont.bring(:submissions) if ont.bring?(:submissions)
     assert_equal 2, ont.submissions.length
@@ -257,6 +275,8 @@ class TestOntologyPull < TestCase
 
     pull = NcboCron::Models::OntologyPull.new
     pull.do_remote_ontology_pull
+    # A missing remote file is reported to the admins, not as a failure
+    assert_no_processing_failures pull.failures
 
     assert_match "] Load from URL failure for #{ont.name}", last_email_sent.subject
     user = ont.administeredBy[0]
@@ -287,7 +307,43 @@ class TestOntologyPull < TestCase
     reset_mailer
     pull = NcboCron::Models::OntologyPull.new
     pull.do_remote_ontology_pull
+    assert_no_processing_failures pull.failures
     assert Pony.deliveries.empty?
+  end
+
+  def test_unexpected_pull_error_is_reported
+    stub_remote_ontology_success(@@url)
+    ontologies = init_ontologies(1)
+    ontologies[0].bring(:acronym)
+    acronym = ontologies[0].acronym
+    NcboCron::Helpers::OntologyHelper.stubs(:do_ontology_pull).raises(StandardError, 'simulated pull failure')
+
+    pull = NcboCron::Models::OntologyPull.new
+    new_submissions = pull.do_remote_ontology_pull(logger: Logger.new(StringIO.new))
+
+    assert_empty new_submissions
+    failure = pull.failures.find { |f| f.item == acronym }
+    refute_nil failure, "No failure reported for #{acronym}: #{pull.failures.join("\n")}"
+    assert_equal 'Unexpected error during pull', failure.message
+    assert_equal 'simulated pull failure', failure.error.message
+    # the pull goes on to the other ontologies
+    assert_equal LinkedData::Models::Ontology.where.all.length, pull.failures.length
+  end
+
+  def test_failed_pull_notification_is_reported
+    stub_remote_ontology_not_found(@@url)
+    ontologies = init_ontologies(1)
+    ontologies[0].bring(:acronym)
+    acronym = ontologies[0].acronym
+    LinkedData::Utils::Notifications.stubs(:remote_ontology_pull).raises(StandardError, 'simulated mail failure')
+
+    pull = NcboCron::Models::OntologyPull.new
+    pull.do_remote_ontology_pull(logger: Logger.new(StringIO.new))
+
+    failure = pull.failures.find { |f| f.item == acronym }
+    refute_nil failure, "No failure reported for #{acronym}: #{pull.failures.join("\n")}"
+    assert_equal 'Pull failure notification failed', failure.message
+    assert_equal 'simulated mail failure', failure.error.message
   end
 
   def teardown
