@@ -36,7 +36,7 @@ module NcboCron
             new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym,
                                                                                 logger: logger,
                                                                                 add_to_queue: false)
-            return unless new_submission
+            next unless new_submission
             realKey = new_submission.id.to_s
             actions.delete(:remote_pull)
           end
