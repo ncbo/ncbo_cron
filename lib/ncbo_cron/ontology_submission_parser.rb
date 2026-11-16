@@ -8,19 +8,28 @@ module NcboCron
 
       QUEUE_HOLDER = NcboCron::Helpers::OntologyHelper::PROCESS_QUEUE_HOLDER
       ACTIONS = NcboCron::Helpers::OntologyHelper::PROCESS_ACTIONS
+      ProcessingFailure = NcboCron::Helpers::OntologyHelper::ProcessingFailure
+
+      # The ProcessingFailures from the last process_queue_submissions run
+      attr_reader :failures
 
       def initialize()
+        @failures = []
       end
 
       def queue_submission(submission, actions={ :all => true })
         NcboCron::Helpers::OntologyHelper.queue_submission(submission, actions)
       end
 
+      # Processes every queued submission. A failed item is logged and the run moves
+      # on to the next one, so one bad submission doesn't hold up the queue. Returns
+      # the ProcessingFailures, which are also kept in #failures.
       def process_queue_submissions(options={})
         logger = options[:logger]
         logger ||= Kernel.const_defined?("LOGGER") ? Kernel.const_get("LOGGER") : Logger.new(STDOUT)
         redis = Redis.new(:host => NcboCron.settings.redis_host, :port => NcboCron.settings.redis_port)
-        all = queued_items(redis, logger)
+        @failures = []
+        all = queued_items(redis, logger, failures: @failures)
 
         all.each do |process_data|
           actions = process_data[:actions]
@@ -28,29 +37,33 @@ module NcboCron
           key = process_data[:redis_key]
           redis.hdel(QUEUE_HOLDER, key)
 
-          # if :remote_pull is one of the actions, pull the ontology and halt if no new submission is found
-          # if a new submission is found, replace the submission ID with the new one and proceed with
-          # processing the remaining actions on the new submission
-          if actions.key?(:remote_pull) && actions[:remote_pull]
-            acronym = NcboCron::Helpers::OntologyHelper.acronym_from_submission_id(realKey)
-            new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym,
-                                                                                logger: logger,
-                                                                                add_to_queue: false)
-            next unless new_submission
-            realKey = new_submission.id.to_s
-            actions.delete(:remote_pull)
-          end
-
           begin
-            process_submission(logger, realKey, actions)
+            # if :remote_pull is one of the actions, pull the ontology and skip this item if no new
+            # submission is found. If a new submission is found, replace the submission ID with the new
+            # one and proceed with processing the remaining actions on the new submission
+            if actions.key?(:remote_pull) && actions[:remote_pull]
+              acronym = NcboCron::Helpers::OntologyHelper.acronym_from_submission_id(realKey)
+              new_submission = NcboCron::Helpers::OntologyHelper.do_ontology_pull(acronym,
+                                                                                  logger: logger,
+                                                                                  add_to_queue: false)
+              next unless new_submission
+              realKey = new_submission.id.to_s
+              actions.delete(:remote_pull)
+            end
+
+            @failures.concat(process_submission(logger, realKey, actions))
           rescue Exception => e
             logger.debug "Exception processing #{realKey}"
             logger.error(e.message + "\n" + e.backtrace.join("\n\t"))
+            @failures << ProcessingFailure.new(item: realKey, message: 'Processing raised an exception', error: e)
           end
         end
+        @failures
       end
 
-      def queued_items(redis, logger=nil)
+      # Records that can't be read are logged, left in the queue and, when a failures
+      # array is given, added to it
+      def queued_items(redis, logger=nil, failures: nil)
         logger ||= Kernel.const_defined?("LOGGER") ? Kernel.const_get("LOGGER") : Logger.new(STDOUT)
         all = redis.hgetall(QUEUE_HOLDER)
         prefix_remove = Regexp.new(/^#{NcboCron::Helpers::OntologyHelper::REDIS_SUBMISSION_ID_PREFIX}/)
@@ -62,6 +75,7 @@ module NcboCron
             logger.error("Invalid record in the parse queue: #{key} - #{val}:\n")
             logger.error(e.message + "\n" + e.backtrace.join("\n\t"))
             logger.flush()
+            failures << ProcessingFailure.new(item: key, message: 'Invalid record in the parse queue', error: e) if failures
             next
           end
           items << {
@@ -148,7 +162,11 @@ module NcboCron
         deleted
       end
 
+      # Runs the actions on one submission. Returns the ProcessingFailures for the
+      # outcomes it logs as errors (empty when the run went through). Exceptions
+      # are left to the caller.
       def process_submission(logger, submission_id, actions = ACTIONS)
+        failures = []
         multi_logger = LinkedData::Utils::MultiLogger.new(loggers: logger)
         t0 = Time.now
         sub = LinkedData::Models::OntologySubmission.find(RDF::IRI.new(submission_id)).first
@@ -179,17 +197,23 @@ module NcboCron
 
           if parsed
             archive_old_submissions(multi_logger, sub) if actions[:process_rdf]
-            process_annotator(multi_logger, sub) if actions[:process_annotator]
+            if actions[:process_annotator]
+              annotator_failure = process_annotator(multi_logger, sub)
+              failures << annotator_failure if annotator_failure
+            end
             multi_logger.debug "Completed processing of #{submission_id} in #{(Time.now - t0).to_f.round(2)}s"
           else
             multi_logger.error "Submission #{submission_id} parsing failed"
+            failures << ProcessingFailure.new(item: submission_id, message: 'Parsing failed')
           end
           unless actions[:skip_refresh_report]
             NcboCron::Models::OntologiesReport.new(multi_logger).refresh_report([sub.ontology.acronym])
           end
         else
           multi_logger.error "Submission #{submission_id} is not in the system. Processing cancelled..."
+          failures << ProcessingFailure.new(item: submission_id, message: 'Submission is not in the system')
         end
+        failures
       end
 
       def get_prefixed_id(id)
@@ -217,7 +241,8 @@ module NcboCron
         logger.debug "Completed archiving submissions previous to #{sub.id.to_s}"
       end
 
-      # Add new ontology terms to the Annotator
+      # Add new ontology terms to the Annotator. Returns a ProcessingFailure if that
+      # could not be done, nil otherwise.
       def process_annotator(logger, sub)
         parsed = sub.ready?(status: [:rdf, :rdf_labels])
 
@@ -233,10 +258,13 @@ module NcboCron
           rescue Exception => e
             logger.error(e.message + "\n" + e.backtrace.join("\n\t"))
             logger.flush()
+            return ProcessingFailure.new(item: sub.id.to_s, message: 'Annotator update failed', error: e)
           end
         else
           logger.error "Annotator entries cannot be generated on the submission #{sub.id.to_s} because it has not been successfully parsed"
+          return ProcessingFailure.new(item: sub.id.to_s, message: 'Annotator update skipped: submission is not parsed')
         end
+        nil
       end
     end
 

@@ -33,6 +33,19 @@ module NcboCron
         :remote_pull => false
       }
 
+      # An item that a processing or pull run could not complete. The run logs the
+      # failure and moves on to the next item, so the cron jobs keep going; it also
+      # returns the failures so callers and tests can see what went wrong.
+      #
+      # item is the submission id (queue processing) or the ontology acronym (pull),
+      # and error is the exception that was rescued, if there was one.
+      ProcessingFailure = Struct.new(:item, :message, :error, keyword_init: true) do
+        def to_s
+          detail = error ? " (#{error.class}: #{error.message})" : ''
+          "#{item}: #{message}#{detail}"
+        end
+      end
+
       class RemoteFileException < StandardError
         attr_reader :submission
 
