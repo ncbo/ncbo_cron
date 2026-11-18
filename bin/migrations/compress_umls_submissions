@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+
+# Gzips the Turtle files of existing UMLS submissions (SNOMEDCT, NCIT, ...) and points
+# their uploadFilePath/masterFileName at the archive, so processing and downloads read
+# the compressed file. New UMLS submissions are already created gzipped by
+# bin/create_umls_submissions.rb.
+#
+# Each archive is checked to decompress to the original bytes before the submission is
+# repointed, and the original is deleted only after the new path is read back from the
+# triplestore. Submissions waiting in the processing queue are skipped. Safe to re-run:
+# submissions that are already compressed are left alone.
+#
+#   bin/migrations/compress_umls_submissions --dryrun
+#   bin/migrations/compress_umls_submissions -o SNOMEDCT,NCIT
+#   bin/migrations/compress_umls_submissions
+
+# Exit cleanly from an early interrupt
+Signal.trap("INT") { exit 1 }
+
+require 'bundler/setup'
+require 'optparse'
+
+options = { dry_run: false, keep_original: false, ontologies: nil, logfile: nil }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
+  opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only these UMLS ontologies (default: all of them)') do |acronyms|
+    options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
+  end
+  opts.on('-d', '--dryrun', 'List what would be compressed; change nothing') { options[:dry_run] = true }
+  opts.on('-k', '--keep-original', 'Keep the uncompressed file next to the archive') { options[:keep_original] = true }
+  opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
+  opts.on('-h', '--help', 'Display this screen') do
+    puts opts
+    exit
+  end
+end.parse!
+
+require_relative '../../lib/ncbo_cron'
+config_exists = File.exist?(File.expand_path('../../../config/config.rb', __FILE__))
+abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+require_relative '../../config/config'
+
+outputs = [$stdout]
+outputs << File.open(options[:logfile], 'a') if options[:logfile]
+logger = Logger.new(Class.new {
+  define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
+  define_method(:close) { outputs.drop(1).each(&:close) }
+}.new)
+
+logger.info("Repository: #{LinkedData.settings.repository_folder}; triplestore: #{LinkedData.settings.goo_host}")
+
+compressor = NcboCron::Models::UmlsSubmissionCompressor.new(logger: logger,
+                                                            dry_run: options[:dry_run],
+                                                            keep_original: options[:keep_original])
+compressor.run(acronyms: options[:ontologies])
+
+failures = compressor.failures
+unless failures.empty?
+  logger.error("#{failures.length} submissions need attention:\n  #{failures.join("\n  ")}")
+  exit 1
+end
