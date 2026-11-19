@@ -11,7 +11,9 @@ class TestUmlsPullLocationCleaner < TestCase
 
   def setup
     super
-    create(acronym: 'UMLSPULL', format: 'UMLS', submission_count: 3)
+    @group = LinkedData::Models::Group.find('UMLS').first ||
+             LinkedData::Models::Group.new(acronym: 'UMLS', name: 'UMLS').save
+    create(acronym: 'UMLSPULL', format: 'UMLS', submission_count: 3, in_group: true)
     create(acronym: 'OWLPULL', format: 'OWL', submission_count: 2)
     submissions('OWLPULL-0').each { |s| set_pull_location(s, LEGACY_URL) }
   end
@@ -19,6 +21,7 @@ class TestUmlsPullLocationCleaner < TestCase
   def teardown
     LinkedData::Models::OntologySubmission.any_instance.unstub(:remote_file_exists?)
     LinkedData::SampleData::Ontology.delete_ontologies_and_submissions
+    LinkedData::Models::Group.find('UMLS').first&.delete
     super
   end
 
@@ -90,12 +93,37 @@ class TestUmlsPullLocationCleaner < TestCase
 
   def test_only_named_ontologies_are_cleared
     seed_umls(LEGACY_URL, nil, nil)
-    create(acronym: 'UMLSOTHER', format: 'UMLS', submission_count: 1)
+    create(acronym: 'UMLSOTHER', format: 'UMLS', submission_count: 1, in_group: true)
     set_pull_location(submissions('UMLSOTHER-0').first, LEGACY_URL)
 
     results = cleaner.run(acronyms: ['umlsother-0'])
 
     assert_equal [['UMLSOTHER-0', :cleared]], results.map { |r| [r.acronym, r.status] }
+    assert_equal [LEGACY_URL, nil, nil], pull_locations('UMLSPULL-0')
+  end
+
+  def test_umls_format_ontologies_outside_the_group_are_left_alone
+    seed_umls(LEGACY_URL, nil, LEGACY_URL)
+    create(acronym: 'UPLOADED', format: 'UMLS', submission_count: 2)
+    submissions('UPLOADED-0').each { |s| set_pull_location(s, LEGACY_URL) }
+    log = StringIO.new
+
+    results = cleaner(logger: Logger.new(log)).run
+
+    assert_equal ['UMLSPULL-0'], results.map(&:acronym).uniq
+    assert_equal [nil, nil, nil], pull_locations('UMLSPULL-0')
+    assert_equal [LEGACY_URL, LEGACY_URL], pull_locations('UPLOADED-0'), 'even a legacy apikey URL is kept'
+    assert_includes log.string, 'Skipping 1 UMLS-format ontologies outside the UMLS group: UPLOADED-0'
+    assert_empty cleaner.run(acronyms: ['UPLOADED-0']), 'naming an ontology does not bypass the group'
+    assert_equal [LEGACY_URL, LEGACY_URL], pull_locations('UPLOADED-0')
+  end
+
+  def test_missing_group_stops_the_run
+    seed_umls(LEGACY_URL, nil, nil)
+
+    error = assert_raises(ArgumentError) { cleaner(group: 'NOSUCHGROUP').run }
+
+    assert_equal 'Group NOSUCHGROUP not found', error.message
     assert_equal [LEGACY_URL, nil, nil], pull_locations('UMLSPULL-0')
   end
 
@@ -137,11 +165,17 @@ class TestUmlsPullLocationCleaner < TestCase
     UmlsPullLocationCleaner.new(logger: logger, **options)
   end
 
-  def create(acronym:, format:, submission_count:)
+  def create(acronym:, format:, submission_count:, in_group: false)
     LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
       ont_count: 1, submission_count: submission_count, process_submission: false,
       acronym: acronym, ontology_format: format, file_path: OWL_FILE
     )
+    return unless in_group
+
+    ont = LinkedData::Models::Ontology.find("#{acronym}-0").first
+    ont.bring_remaining
+    ont.group = [@group]
+    ont.save
   end
 
   # Sets the pull locations of UMLSPULL-0's submissions, oldest first; nil leaves one unset
