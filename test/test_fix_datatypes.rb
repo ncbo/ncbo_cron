@@ -10,6 +10,7 @@ class TestFixDatatypes < TestCase
   HOMEPAGE = Submission.attribute_uri(:homepage)
   LEGACY_HOMEPAGE = RDF::URI.new("#{Goo.namespaces[:metadata]}homepage")
   URI_PREDICATE = Submission.attribute_uri(:uri)
+  PULL_LOCATION = Submission.attribute_uri(:pullLocation)
 
   def setup
     super
@@ -179,6 +180,40 @@ class TestFixDatatypes < TestCase
     assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
     assert_equal [RDF::URI.new('urn:lsid:bioontology.org:cell')], stored(first, URI_PREDICATE)
     assert_equal [RDF::URI.new('http://onto.example.org/bro.owl#')], stored(second, URI_PREDICATE)
+  end
+
+  def test_ftp_pull_location_is_removed
+    first, second, latest = submissions('FIXDT-0')
+    [first, second, latest].each { |sub| clear(sub, PULL_LOCATION) }
+    store(first, PULL_LOCATION, RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo'))
+    # ftp in the host or path of an http(s) URL is not an ftp pull location
+    store(second, PULL_LOCATION, RDF::URI.new('https://ftp.example.org/pub/ftp/onto.obo'))
+    store(latest, PULL_LOCATION, RDF::URI.new('http://www.example.org/ftp://mirror/onto.obo'))
+
+    dry = fixer(dry_run: true).run(acronyms: ['FIXDT-0'])
+    assert_equal :would_fix, dry.first.status, dry.first.to_s
+    assert_includes dry.first.changes.last, 'pullLocation: "ftp://ftp.example.org/pub/onto.obo" -> removed'
+    refute_empty stored(first, PULL_LOCATION), 'a dry run removes nothing'
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
+    assert_empty stored(first, PULL_LOCATION)
+    assert_equal [RDF::URI.new('https://ftp.example.org/pub/ftp/onto.obo')], stored(second, PULL_LOCATION)
+    assert_equal [RDF::URI.new('http://www.example.org/ftp://mirror/onto.obo')], stored(latest, PULL_LOCATION)
+    first.bring_remaining
+    assert first.valid?, first.errors.inspect
+  end
+
+  def test_ftp_pull_location_alone_is_removed
+    latest = submissions('FIXDT-0').last
+    clear(latest, PULL_LOCATION)
+    store(latest, PULL_LOCATION, RDF::URI.new('ftp://ftp.example.org/pub/onto.obo'))
+
+    result = fixer.run(acronyms: ['FIXDT-0']).last
+
+    assert_equal :fixed, result.status, result.to_s
+    assert_empty stored(latest, PULL_LOCATION)
   end
 
   def test_each_value_is_stored_once

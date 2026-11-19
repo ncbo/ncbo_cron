@@ -2,7 +2,7 @@
 
 # Migration: repairs ontology submissions whose URI-typed metadata (documentation,
 # homepage, publication, uri) is stored as plain literals or invalid URIs, and fills in
-# a missing contact. Goo refuses to save such submissions, so anything that re-saves
+# a missing contact, and removes ftp:// pull locations. Goo refuses to save such submissions, so anything that re-saves
 # them (processing, archiving, other migrations) fails validation.
 #
 # Every submission of every ontology is checked, not only the latest. Values are read
@@ -35,6 +35,10 @@ class SubmissionDatatypeFixer
     publication: { is_single: false },
     uri: { is_single: true }
   }.freeze
+
+  # pullLocation is type :url, which accepts only http(s), and nothing pulls over ftp, so
+  # these values are removed rather than repaired
+  FTP_PULL_LOCATION = %r{\Aftp://}i
 
   FAILED = %i[invalid error].freeze
   URL_IN_TEXT = %r{https?://[^\s<>"'{}|\\^`]+}i
@@ -112,6 +116,13 @@ class SubmissionDatatypeFixer
       changes << "#{attr}: #{describe(stored.map(&:last))} -> #{describe(Array(new_value))}"
     end
 
+    ftp = ftp_pull_locations(sub)
+    unless ftp.empty?
+      kept = stored_pull_locations(sub) - ftp
+      sub.pullLocation = kept.empty? ? nil : RDF::URI.new(kept.first.to_s)
+      changes << "pullLocation: #{describe(ftp)} -> removed"
+    end
+
     add_contact = sub.contact.nil? || sub.contact.empty?
     if add_contact
       sub.contact = [fallback_contact]
@@ -121,10 +132,10 @@ class SubmissionDatatypeFixer
     return result(ont, sub, :ok) if changes.empty?
 
     # The repair is written as triples, so errors in attributes it doesn't touch (a bad
-    # version, an ftp pullLocation) don't block it; those submissions are reported.
+    # version) don't block it; those submissions are reported.
     other_errors = nil
     unless submission_valid?(sub)
-      touched = fixed.keys + (add_contact ? [:contact] : [])
+      touched = fixed.keys + (add_contact ? [:contact] : []) + (ftp.empty? ? [] : [:pullLocation])
       errors = sub.errors || {}
       if errors.empty? || (errors.keys & touched).any?
         return result(ont, sub, :invalid, "not fixed: #{sub.errors}", changes: changes)
@@ -135,8 +146,9 @@ class SubmissionDatatypeFixer
       return result(ont, sub, other_errors ? :would_fix_still_invalid : :would_fix, other_errors, changes: changes)
     end
 
-    write_repaired_values(sub, fixed, add_contact: add_contact)
+    write_repaired_values(sub, fixed, add_contact: add_contact, removed_pull_locations: ftp)
     leftovers = fixed.keys.reject { |attr| clean?(sub, attr) }
+    leftovers << :pullLocation unless ftp_pull_locations(sub).empty?
     unless leftovers.empty?
       return result(ont, sub, :error, "saved, but #{leftovers.join(', ')} still hold old values",
                     changes: changes)
@@ -190,6 +202,16 @@ class SubmissionDatatypeFixer
       SPARQL
       Goo.sparql_query_client.query(query).map { |solution| [predicate, solution[:o]] }
     end
+  end
+
+  def stored_pull_locations(sub)
+    predicate = LinkedData::Models::OntologySubmission.attribute_uri(:pullLocation)
+    query = "SELECT ?o FROM <#{sub.graph}> WHERE { <#{sub.id}> <#{predicate}> ?o . }"
+    Goo.sparql_query_client.query(query).map { |solution| solution[:o] }
+  end
+
+  def ftp_pull_locations(sub)
+    stored_pull_locations(sub).select { |term| term.to_s.strip.match?(FTP_PULL_LOCATION) }
   end
 
   # The value to assign, or :unchanged when the stored values are already valid URIs
@@ -276,7 +298,7 @@ class SubmissionDatatypeFixer
   #
   # New values go in before old ones come out. A kept value that is stored more than once
   # is deleted (removing every copy) and inserted once again.
-  def write_repaired_values(sub, fixed, add_contact:)
+  def write_repaired_values(sub, fixed, add_contact:, removed_pull_locations: [])
     insert = RDF::Graph.new
     delete = RDF::Graph.new
     reinsert = RDF::Graph.new
@@ -298,6 +320,9 @@ class SubmissionDatatypeFixer
 
         delete << [sub.id, predicate, term]
       end
+    end
+    removed_pull_locations.each do |term|
+      delete << [sub.id, LinkedData::Models::OntologySubmission.attribute_uri(:pullLocation), term]
     end
     if add_contact
       insert << [sub.id, LinkedData::Models::OntologySubmission.attribute_uri(:contact), fallback_contact.id]
