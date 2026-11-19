@@ -217,18 +217,51 @@ class TestFixDatatypes < TestCase
   end
 
   def test_ftp_pull_location_is_kept_when_removal_is_off
-    assert SubmissionDatatypeFixer::REMOVE_FTP_PULL_LOCATIONS, 'removal is on by default'
+    assert SubmissionDatatypeFixer::REMOVE_FTP_URLS, 'removal is on by default'
     first = submissions('FIXDT-0').first
     clear(first, PULL_LOCATION)
     store(first, PULL_LOCATION, RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo'))
 
-    result = fixer(remove_ftp_pull_locations: false).run(acronyms: ['FIXDT-0']).first
+    result = fixer(remove_ftp_urls: false).run(acronyms: ['FIXDT-0']).first
 
     # The literal publication is still fixed; the ftp pull location keeps it invalid
     assert_equal :fixed_still_invalid, result.status, result.to_s
     assert_includes result.message, 'pullLocation'
     assert_equal [RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo')], stored(first, PULL_LOCATION)
     assert(stored(first, PUBLICATION).all? { |v| v.is_a?(RDF::URI) })
+  end
+
+  def test_ftp_homepage_and_documentation_are_removed_from_archived_submissions
+    first, second, latest = submissions('FIXDT-0')
+    archive(first)
+    archive(second)
+    store(first, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/pub/'))
+    clear(first, DOCUMENTATION)
+    store(first, DOCUMENTATION, RDF::URI.new('ftp://ftp.example.org/pub/readme.txt'))
+    store(second, HOMEPAGE, RDF::URI.new('https://ftp.example.org/ftp/'))
+    store(latest, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/latest/'))
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :invalid], results.map(&:status), results.join("\n")
+    assert_includes results.first.changes, 'homepage: "ftp://ftp.example.org/pub/" -> removed'
+    assert_empty stored(first, HOMEPAGE)
+    assert_empty stored(first, DOCUMENTATION)
+    assert_equal [RDF::URI.new('https://ftp.example.org/ftp/')], stored(second, HOMEPAGE)
+    # Only archived submissions lose them; the latest one is reported and left alone
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/latest/')], stored(latest, HOMEPAGE)
+    assert_equal [:ok, :ok, :invalid], fixer.run(acronyms: ['FIXDT-0']).map(&:status)
+  end
+
+  def test_ftp_homepage_on_an_archived_submission_is_kept_when_removal_is_off
+    first = submissions('FIXDT-0').first
+    archive(first)
+    store(first, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/pub/'))
+
+    result = fixer(remove_ftp_urls: false).run(acronyms: ['FIXDT-0']).first
+
+    assert_equal :invalid, result.status, result.to_s
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/pub/')], stored(first, HOMEPAGE)
   end
 
   def test_each_value_is_stored_once
@@ -308,6 +341,11 @@ class TestFixDatatypes < TestCase
     graph = RDF::Graph.new
     objects.each { |o| graph << [sub.id, predicate, o] }
     Goo.sparql_update_client.insert_data(graph, graph: sub.graph)
+  end
+
+  def archive(sub)
+    status = LinkedData::Models::SubmissionStatus.find('ARCHIVED').first
+    store(sub, Submission.attribute_uri(:submissionStatus), status.id)
   end
 
   def clear(sub, predicate)

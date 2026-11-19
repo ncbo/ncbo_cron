@@ -2,7 +2,7 @@
 
 # Migration: repairs ontology submissions whose URI-typed metadata (documentation,
 # homepage, publication, uri) is stored as plain literals or invalid URIs, fills in a
-# missing contact, and removes ftp:// pull locations (see REMOVE_FTP_PULL_LOCATIONS).
+# missing contact, and removes ftp:// URLs the model can't hold (see REMOVE_FTP_URLS).
 # Goo refuses to save such submissions, so anything that re-saves them (processing,
 # archiving, other migrations) fails validation.
 #
@@ -37,11 +37,14 @@ class SubmissionDatatypeFixer
     uri: { is_single: true }
   }.freeze
 
-  # pullLocation is type :url, which accepts only http(s), so a submission with an ftp://
-  # pull location fails validation. Those values are removed; set this to false to keep
-  # them. Only values that start with ftp:// match, not http(s) URLs with ftp in the path.
-  REMOVE_FTP_PULL_LOCATIONS = true
-  FTP_PULL_LOCATION = %r{\Aftp://}i
+  # pullLocation, homepage and documentation are type :url, which accepts only http(s), so
+  # a submission with an ftp:// value there fails validation. With this on (the default),
+  # ftp:// pull locations are removed from every submission, and ftp:// homepage and
+  # documentation values from archived submissions. Set it to false to keep them all.
+  # Only values that start with ftp:// match, not http(s) URLs with ftp in the host or path.
+  REMOVE_FTP_URLS = true
+  FTP_URL = %r{\Aftp://}i
+  FTP_REMOVED_FROM_ARCHIVED = %i[homepage documentation].freeze
 
   FAILED = %i[invalid error].freeze
   URL_IN_TEXT = %r{https?://[^\s<>"'{}|\\^`]+}i
@@ -67,11 +70,11 @@ class SubmissionDatatypeFixer
   attr_reader :results
 
   def initialize(logger: Logger.new($stdout), dry_run: false, latest_only: false,
-                 remove_ftp_pull_locations: REMOVE_FTP_PULL_LOCATIONS)
+                 remove_ftp_urls: REMOVE_FTP_URLS)
     @logger = logger
     @dry_run = dry_run
     @latest_only = latest_only
-    @remove_ftp_pull_locations = remove_ftp_pull_locations
+    @remove_ftp_urls = remove_ftp_urls
     @results = []
   end
 
@@ -110,18 +113,20 @@ class SubmissionDatatypeFixer
     sub.bring_remaining
     changes = []
     fixed = {} # attr => [stored values, new value]
+    drop_ftp = drop_ftp_attributes(sub)
 
     URI_ATTRIBUTES_TO_FIX.each do |attr, settings|
       stored = stored_values(sub, attr)
-      new_value = repaired_value(attr, settings, stored)
+      new_value = repaired_value(attr, settings, stored, drop_ftp: drop_ftp.include?(attr))
       next if new_value == :unchanged
 
       sub.send("#{attr}=", new_value)
       fixed[attr] = [stored, new_value]
-      changes << "#{attr}: #{describe(stored.map(&:last))} -> #{describe(Array(new_value))}"
+      new_terms = Array(new_value)
+      changes << "#{attr}: #{describe(stored.map(&:last))} -> #{new_terms.empty? ? 'removed' : describe(new_terms)}"
     end
 
-    ftp = @remove_ftp_pull_locations ? ftp_pull_locations(sub) : []
+    ftp = @remove_ftp_urls ? ftp_pull_locations(sub) : []
     unless ftp.empty?
       kept = stored_pull_locations(sub) - ftp
       sub.pullLocation = kept.empty? ? nil : RDF::URI.new(kept.first.to_s)
@@ -152,7 +157,7 @@ class SubmissionDatatypeFixer
     end
 
     write_repaired_values(sub, fixed, add_contact: add_contact, removed_pull_locations: ftp)
-    leftovers = fixed.keys.reject { |attr| clean?(sub, attr) }
+    leftovers = fixed.keys.reject { |attr| clean?(sub, attr, drop_ftp: drop_ftp.include?(attr)) }
     leftovers << :pullLocation unless ftp.empty? || ftp_pull_locations(sub).empty?
     unless leftovers.empty?
       return result(ont, sub, :error, "saved, but #{leftovers.join(', ')} still hold old values",
@@ -216,29 +221,42 @@ class SubmissionDatatypeFixer
   end
 
   def ftp_pull_locations(sub)
-    stored_pull_locations(sub).select { |term| term.to_s.strip.match?(FTP_PULL_LOCATION) }
+    stored_pull_locations(sub).select { |term| ftp?(term) }
+  end
+
+  def ftp?(term)
+    term.to_s.strip.match?(FTP_URL)
+  end
+
+  # The attributes whose ftp:// values are removed rather than repaired
+  def drop_ftp_attributes(sub)
+    @remove_ftp_urls && sub.archived? ? FTP_REMOVED_FROM_ARCHIVED : []
   end
 
   # The value to assign, or :unchanged when the stored values are already valid URIs
-  # under the model's predicate
-  def repaired_value(attr, settings, stored)
+  # under the model's predicate. drop_ftp: remove ftp:// values instead of keeping them.
+  def repaired_value(attr, settings, stored, drop_ftp: false)
     if stored.empty?
       return required?(attr) ? RDF::URI.new(DEFAULT_URI) : :unchanged
     end
-    return :unchanged if clean_values?(attr, settings, stored)
+    return :unchanged if clean_values?(attr, settings, stored, drop_ftp: drop_ftp)
 
     repaired = stored.flat_map { |_, term| fix_invalid_uri(term.to_s, attr) }.uniq
+    repaired.reject! { |uri| ftp?(uri) } if drop_ftp
+    repaired = [RDF::URI.new(DEFAULT_URI)] if repaired.empty? && required?(attr)
     settings[:is_single] ? repaired.first : repaired
   end
 
-  def clean_values?(attr, settings, stored)
+  def clean_values?(attr, settings, stored, drop_ftp: false)
     model_predicate = predicates(attr).first
-    clean = stored.all? { |predicate, term| predicate == model_predicate && valid_uri_term?(term) }
+    clean = stored.all? do |predicate, term|
+      predicate == model_predicate && valid_uri_term?(term) && !(drop_ftp && ftp?(term))
+    end
     clean && stored.uniq.length == stored.length && (!settings[:is_single] || stored.length <= 1)
   end
 
-  def clean?(sub, attr)
-    clean_values?(attr, URI_ATTRIBUTES_TO_FIX[attr], stored_values(sub, attr))
+  def clean?(sub, attr, drop_ftp: false)
+    clean_values?(attr, URI_ATTRIBUTES_TO_FIX[attr], stored_values(sub, attr), drop_ftp: drop_ftp)
   end
 
   def required?(attr)
