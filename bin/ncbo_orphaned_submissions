@@ -1,0 +1,90 @@
+#!/usr/bin/env ruby
+
+# Read-only report of OntologySubmission resources that have lost their link to an ontology:
+# typed submissions with no `ontology` triple, `ontology` triples pointing at a missing
+# ontology, and triples left in the submission graph with no rdf:type. Also lists Metrics
+# resources whose submission is gone. See NcboCron::Models::OrphanedSubmissionsReport.
+#
+# Nothing is changed in the triplestore or the repository folder, so this is safe to run on
+# any environment. API keys in stored values are masked.
+#
+#   bin/ncbo_orphaned_submissions
+#   bin/ncbo_orphaned_submissions -o CDAO,EMAPA --details
+#   bin/ncbo_orphaned_submissions --csv orphans.csv
+#
+# Exits 1 when an orphan blocks new submissions of an ontology, 0 otherwise.
+
+# Exit cleanly from an early interrupt
+Signal.trap("INT") { exit 1 }
+
+require 'bundler/setup'
+require 'optparse'
+require 'csv'
+
+options = { ontologies: nil, details: false, csv: nil, logfile: nil }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
+  opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only report orphans of these ontologies (default: all)') do |acronyms|
+    options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
+  end
+  opts.on('-d', '--details', 'Also print every triple of each orphan') { options[:details] = true }
+  opts.on('-c', '--csv FILE', 'Also write one row per orphan to FILE') { |file| options[:csv] = file }
+  opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
+  opts.on('-h', '--help', 'Display this screen') do
+    puts opts
+    exit
+  end
+end.parse!
+
+require_relative '../lib/ncbo_cron'
+config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+require_relative '../config/config'
+
+outputs = [$stdout]
+outputs << File.open(options[:logfile], 'a') if options[:logfile]
+logger = Logger.new(Class.new {
+  define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
+  define_method(:close) { outputs.drop(1).each(&:close) }
+}.new)
+
+Report = NcboCron::Models::OrphanedSubmissionsReport
+mask = ->(text) { Report.mask(text) }
+
+logger.info("Triplestore: #{LinkedData.settings.goo_host}, repository: #{LinkedData.settings.repository_folder}")
+result = Report.new(logger: logger).run(acronyms: options[:ontologies])
+
+Report::KINDS.each do |kind|
+  orphans = result.by_kind(kind)
+  logger.info("#{kind}: #{orphans.length}")
+  orphans.each do |orphan|
+    logger.info("  #{mask.call(orphan)}")
+    next unless options[:details]
+
+    orphan.triples.each { |p, o| logger.info("      <#{p}> #{mask.call(o.respond_to?(:to_ntriples) ? o.to_ntriples : o)}") }
+  end
+end
+
+effects = result.orphans.group_by(&:effect).transform_values(&:length)
+logger.info("By effect: #{effects.empty? ? 'none' : effects.map { |k, v| "#{k}=#{v}" }.join(', ')}")
+logger.info("Orphaned metrics: #{result.orphaned_metrics.length}")
+result.orphaned_metrics.each { |m| logger.info("  #{m}") } if options[:details]
+
+if options[:csv]
+  CSV.open(options[:csv], 'w') do |csv|
+    csv << %w[id acronym submission_id kind effect ontology_exists highest_linked_id triples
+              status creation_date folder folder_exists upload_file_paths]
+    result.orphans.each do |o|
+      files = o.upload_files.map { |path, exists| "#{path}#{exists ? '' : ' (missing)'}" }.join(' | ')
+      csv << [o.id, o.acronym, o.submission_id, o.kind, o.effect, o.ontology_exists, o.highest_linked_id,
+              o.triples.length, o.statuses.join('|'), o.creation_date, o.folder, o.folder_exists, mask.call(files)]
+    end
+  end
+  logger.info("Wrote #{result.orphans.length} rows to #{options[:csv]}")
+end
+
+blocking = result.by_effect(:blocks_next_submission)
+unless blocking.empty?
+  logger.error("#{blocking.length} orphans block new submissions: #{blocking.map { |o| "#{o.acronym}/#{o.submission_id}" }.join(', ')}")
+  exit 1
+end
