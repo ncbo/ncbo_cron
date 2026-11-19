@@ -24,7 +24,9 @@ class TestUmlsSubmissionCompressor < TestCase
     turtle_path = File.join(@tmp, 'UMLSZIP.ttl')
     File.write(turtle_path, TURTLE * 50)
 
-    create(acronym: 'UMLSZIP', format: 'UMLS', submission_count: 2, file_path: turtle_path)
+    @group = LinkedData::Models::Group.find('UMLS').first ||
+             LinkedData::Models::Group.new(acronym: 'UMLS', name: 'UMLS').save
+    create(acronym: 'UMLSZIP', format: 'UMLS', submission_count: 2, file_path: turtle_path, in_group: true)
     create(acronym: 'OWLKEEP', format: 'OWL', submission_count: 1,
            file_path: File.expand_path('data/ontology_files/BRO_v3.2.owl', __dir__))
   end
@@ -32,6 +34,7 @@ class TestUmlsSubmissionCompressor < TestCase
   def teardown
     @@redis.del(NcboCron::Helpers::OntologyHelper::PROCESS_QUEUE_HOLDER)
     LinkedData::SampleData::Ontology.delete_ontologies_and_submissions
+    LinkedData::Models::Group.find('UMLS').first&.delete
     FileUtils.rm_rf(@tmp)
     super
   end
@@ -96,11 +99,33 @@ class TestUmlsSubmissionCompressor < TestCase
   def test_only_named_ontologies_are_compressed
     other_turtle = File.join(@tmp, 'UMLSOTHER.ttl')
     File.write(other_turtle, TURTLE)
-    create(acronym: 'UMLSOTHER', format: 'UMLS', submission_count: 1, file_path: other_turtle)
+    create(acronym: 'UMLSOTHER', format: 'UMLS', submission_count: 1, file_path: other_turtle, in_group: true)
 
     results = compressor.run(acronyms: ['umlsother-0'])
 
     assert_equal [['UMLSOTHER-0', :compressed]], results.map { |r| [r.acronym, r.status] }
+    refute submissions('UMLSZIP-0').any?(&:zipped?)
+  end
+
+  def test_umls_format_ontologies_outside_the_group_are_left_alone
+    uploaded_turtle = File.join(@tmp, 'UPLOADED.ttl')
+    File.write(uploaded_turtle, TURTLE)
+    create(acronym: 'UPLOADED', format: 'UMLS', submission_count: 1, file_path: uploaded_turtle)
+    uploaded = submissions('UPLOADED-0').first.uploadFilePath.to_s
+    log = StringIO.new
+
+    results = UmlsSubmissionCompressor.new(logger: Logger.new(log)).run
+
+    assert_equal ['UMLSZIP-0'], results.map(&:acronym).uniq
+    assert_equal uploaded, submissions('UPLOADED-0').first.uploadFilePath.to_s
+    assert File.exist?(uploaded)
+    assert_includes log.string, 'Skipping 1 UMLS-format ontologies outside the UMLS group: UPLOADED-0'
+    assert_empty compressor.run(acronyms: ['UPLOADED-0']), 'naming an ontology does not bypass the group'
+  end
+
+  def test_missing_group_stops_the_run
+    error = assert_raises(ArgumentError) { compressor(group: 'NOSUCHGROUP').run }
+    assert_equal 'Group NOSUCHGROUP not found', error.message
     refute submissions('UMLSZIP-0').any?(&:zipped?)
   end
 
@@ -144,11 +169,17 @@ class TestUmlsSubmissionCompressor < TestCase
     UmlsSubmissionCompressor.new(logger: Logger.new(StringIO.new), **options)
   end
 
-  def create(acronym:, format:, submission_count:, file_path:)
+  def create(acronym:, format:, submission_count:, file_path:, in_group: false)
     LinkedData::SampleData::Ontology.create_ontologies_and_submissions(
       ont_count: 1, submission_count: submission_count, process_submission: false,
       acronym: acronym, ontology_format: format, file_path: file_path
     )
+    return unless in_group
+
+    ont = LinkedData::Models::Ontology.find("#{acronym}-0").first
+    ont.bring_remaining
+    ont.group = [@group]
+    ont.save
   end
 
   def submissions(acronym)
