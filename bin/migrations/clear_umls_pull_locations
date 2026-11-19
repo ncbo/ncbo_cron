@@ -26,7 +26,6 @@
 #   bin/migrations/clear_umls_pull_locations
 #
 # Everything is in this file so the migration can be deleted once it has run.
-# test/test_umls_pull_location_cleaner.rb loads it without running the command line.
 
 require 'logger'
 require 'uri'
