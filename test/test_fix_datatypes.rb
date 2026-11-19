@@ -10,6 +10,7 @@ class TestFixDatatypes < TestCase
   HOMEPAGE = Submission.attribute_uri(:homepage)
   LEGACY_HOMEPAGE = RDF::URI.new("#{Goo.namespaces[:metadata]}homepage")
   URI_PREDICATE = Submission.attribute_uri(:uri)
+  PULL_LOCATION = Submission.attribute_uri(:pullLocation)
 
   def setup
     super
@@ -166,6 +167,103 @@ class TestFixDatatypes < TestCase
     assert_equal [RDF::URI.new('urn:lsid:bioontology.org:ENVO')], stored(sub, URI_PREDICATE)
   end
 
+  def test_a_uri_with_a_version_after_a_pipe_keeps_the_uri
+    # RDF::URI#valid? accepts '|', but AllegroGraph rejects the escaped form N-Triples writes
+    first, second = submissions('FIXDT-0')
+    clear(first, URI_PREDICATE)
+    store(first, URI_PREDICATE, RDF::Literal.new('urn:lsid:bioontology.org:cell|UNASSIGNED'))
+    clear(second, URI_PREDICATE)
+    store(second, URI_PREDICATE, RDF::Literal.new('http://onto.example.org/bro.owl#|??'))
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
+    assert_equal [RDF::URI.new('urn:lsid:bioontology.org:cell')], stored(first, URI_PREDICATE)
+    assert_equal [RDF::URI.new('http://onto.example.org/bro.owl#')], stored(second, URI_PREDICATE)
+  end
+
+  def test_ftp_pull_location_is_removed
+    first, second, latest = submissions('FIXDT-0')
+    [first, second, latest].each { |sub| clear(sub, PULL_LOCATION) }
+    store(first, PULL_LOCATION, RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo'))
+    # ftp in the host or path of an http(s) URL is not an ftp pull location
+    store(second, PULL_LOCATION, RDF::URI.new('https://ftp.example.org/pub/ftp/onto.obo'))
+    store(latest, PULL_LOCATION, RDF::URI.new('http://www.example.org/ftp://mirror/onto.obo'))
+
+    dry = fixer(dry_run: true).run(acronyms: ['FIXDT-0'])
+    assert_equal :would_fix, dry.first.status, dry.first.to_s
+    assert_includes dry.first.changes.last, 'pullLocation: "ftp://ftp.example.org/pub/onto.obo" -> removed'
+    refute_empty stored(first, PULL_LOCATION), 'a dry run removes nothing'
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
+    assert_empty stored(first, PULL_LOCATION)
+    assert_equal [RDF::URI.new('https://ftp.example.org/pub/ftp/onto.obo')], stored(second, PULL_LOCATION)
+    assert_equal [RDF::URI.new('http://www.example.org/ftp://mirror/onto.obo')], stored(latest, PULL_LOCATION)
+    first.bring_remaining
+    assert first.valid?, first.errors.inspect
+  end
+
+  def test_ftp_pull_location_alone_is_removed
+    latest = submissions('FIXDT-0').last
+    clear(latest, PULL_LOCATION)
+    store(latest, PULL_LOCATION, RDF::URI.new('ftp://ftp.example.org/pub/onto.obo'))
+
+    result = fixer.run(acronyms: ['FIXDT-0']).last
+
+    assert_equal :fixed, result.status, result.to_s
+    assert_empty stored(latest, PULL_LOCATION)
+  end
+
+  def test_ftp_pull_location_is_kept_when_removal_is_off
+    assert SubmissionDatatypeFixer::REMOVE_FTP_URLS, 'removal is on by default'
+    first = submissions('FIXDT-0').first
+    clear(first, PULL_LOCATION)
+    store(first, PULL_LOCATION, RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo'))
+
+    result = fixer(remove_ftp_urls: false).run(acronyms: ['FIXDT-0']).first
+
+    # The literal publication is still fixed; the ftp pull location keeps it invalid
+    assert_equal :fixed_still_invalid, result.status, result.to_s
+    assert_includes result.message, 'pullLocation'
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo')], stored(first, PULL_LOCATION)
+    assert(stored(first, PUBLICATION).all? { |v| v.is_a?(RDF::URI) })
+  end
+
+  def test_ftp_homepage_and_documentation_are_removed_from_archived_submissions
+    first, second, latest = submissions('FIXDT-0')
+    archive(first)
+    archive(second)
+    store(first, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/pub/'))
+    clear(first, DOCUMENTATION)
+    store(first, DOCUMENTATION, RDF::URI.new('ftp://ftp.example.org/pub/readme.txt'))
+    store(second, HOMEPAGE, RDF::URI.new('https://ftp.example.org/ftp/'))
+    store(latest, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/latest/'))
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :invalid], results.map(&:status), results.join("\n")
+    assert_includes results.first.changes, 'homepage: "ftp://ftp.example.org/pub/" -> removed'
+    assert_empty stored(first, HOMEPAGE)
+    assert_empty stored(first, DOCUMENTATION)
+    assert_equal [RDF::URI.new('https://ftp.example.org/ftp/')], stored(second, HOMEPAGE)
+    # Only archived submissions lose them; the latest one is reported and left alone
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/latest/')], stored(latest, HOMEPAGE)
+    assert_equal [:ok, :ok, :invalid], fixer.run(acronyms: ['FIXDT-0']).map(&:status)
+  end
+
+  def test_ftp_homepage_on_an_archived_submission_is_kept_when_removal_is_off
+    first = submissions('FIXDT-0').first
+    archive(first)
+    store(first, HOMEPAGE, RDF::Literal.new('ftp://ftp.example.org/pub/'))
+
+    result = fixer(remove_ftp_urls: false).run(acronyms: ['FIXDT-0']).first
+
+    assert_equal :invalid, result.status, result.to_s
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/pub/')], stored(first, HOMEPAGE)
+  end
+
   def test_each_value_is_stored_once
     # AllegroGraph keeps duplicate triples; 4store collapses them, so there this checks
     # only that a value that was already a valid URI isn't lost
@@ -243,6 +341,11 @@ class TestFixDatatypes < TestCase
     graph = RDF::Graph.new
     objects.each { |o| graph << [sub.id, predicate, o] }
     Goo.sparql_update_client.insert_data(graph, graph: sub.graph)
+  end
+
+  def archive(sub)
+    status = LinkedData::Models::SubmissionStatus.find('ARCHIVED').first
+    store(sub, Submission.attribute_uri(:submissionStatus), status.id)
   end
 
   def clear(sub, predicate)
