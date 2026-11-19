@@ -1,7 +1,10 @@
 require_relative 'test_case'
 
+# The report is a standalone script; load it without running its command line
+load File.expand_path('../bin/ncbo_orphaned_submissions', __dir__)
+
 class TestOrphanedSubmissionsReport < TestCase
-  Report = NcboCron::Models::OrphanedSubmissionsReport
+  Report = OrphanedSubmissionsReport
   Submission = LinkedData::Models::OntologySubmission
   ONTOLOGY = Submission.attribute_uri(:ontology)
   SUBMISSION_ID = Submission.attribute_uri(:submissionId)
