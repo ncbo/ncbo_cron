@@ -99,6 +99,37 @@ class TestFixDatatypes < TestCase
     assert_equal [RDF::URI.new(SubmissionDatatypeFixer::DEFAULT_URI)], stored(sub, URI_PREDICATE)
   end
 
+  def test_missing_uri_is_left_alone_because_the_model_does_not_require_it
+    sub = submissions('FIXDT-0').last
+    clear(sub, URI_PREDICATE)
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal :ok, results.last.status, results.last.to_s
+    assert_empty stored(sub, URI_PREDICATE)
+  end
+
+  def test_works_with_the_query_cache_on
+    Goo.use_cache = true
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
+    assert_equal [RDF::URI.new('http://pubs.example.org/3')], stored(submissions('FIXDT-0')[1], PUBLICATION)
+  ensure
+    Goo.use_cache = false
+  end
+
+  def test_failed_save_keeps_the_stored_values
+    Submission.any_instance.stubs(:save).raises(Exception, 'store unavailable')
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    Submission.any_instance.unstub(:save)
+    assert_equal [:error, :error, :ok], results.map(&:status)
+    assert_includes results.first.message, 'store unavailable'
+    assert_includes stored(submissions('FIXDT-0').first, PUBLICATION), RDF::Literal.new('http://pubs.example.org/1')
+  end
+
   def test_missing_contact_gets_the_unknown_contact
     sub = submissions('FIXDT-0').last
     clear(sub, Submission.attribute_uri(:contact))

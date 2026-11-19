@@ -8,7 +8,9 @@
 # Every submission of every ontology is checked, not only the latest. Values are read
 # straight from the triplestore, because goo may load a literal as a String, which the
 # URI validator rejects. Only submissions that need a change are written, and only after
-# the repaired submission passes validation, so the script is safe to re-run.
+# the repaired submission passes validation, so the script is safe to re-run. The old
+# triples are removed after the save, so a failure part way leaves extra values behind,
+# never missing ones; a re-run cleans them up.
 #
 #   bin/migrations/fix_datatypes.rb --dryrun
 #   bin/migrations/fix_datatypes.rb -o ICD10CM,SNOMEDCT
@@ -24,14 +26,14 @@ class SubmissionDatatypeFixer
   DEFAULT_URI = 'http://www.example.com'.freeze
   UNKNOWN_CONTACT = { name: 'Unknown', email: 'noreply@bioontology.org' }.freeze
 
-  # is_single: keep one value; is_required: assign DEFAULT_URI when there is none.
-  # legacy_predicates: older predicates the attribute was stored under. Their values are
-  # read too and moved to the model's predicate.
+  # is_single: keep one value. legacy_predicates: older predicates the attribute was
+  # stored under; their values are read too and moved to the model's predicate.
+  # An attribute the model requires (enforce :existence) gets DEFAULT_URI when it has no value.
   URI_ATTRIBUTES_TO_FIX = {
-    documentation: { is_single: true, is_required: false },
-    homepage: { is_single: true, is_required: false, legacy_predicates: [[:metadata, 'homepage']] },
-    publication: { is_single: false, is_required: false },
-    uri: { is_single: true, is_required: true }
+    documentation: { is_single: true },
+    homepage: { is_single: true, legacy_predicates: [[:metadata, 'homepage']] },
+    publication: { is_single: false },
+    uri: { is_single: true }
   }.freeze
 
   FAILED = %i[invalid error].freeze
@@ -86,7 +88,7 @@ class SubmissionDatatypeFixer
   def fix(ont, sub)
     sub.bring_remaining
     changes = []
-    fixed_attrs = []
+    fixed = {} # attr => [stored values, new value]
 
     URI_ATTRIBUTES_TO_FIX.each do |attr, settings|
       stored = stored_values(sub, attr)
@@ -94,7 +96,7 @@ class SubmissionDatatypeFixer
       next if new_value == :unchanged
 
       sub.send("#{attr}=", new_value)
-      fixed_attrs << attr
+      fixed[attr] = [stored, new_value]
       changes << "#{attr}: #{describe(stored.map(&:last))} -> #{describe(Array(new_value))}"
     end
 
@@ -110,12 +112,20 @@ class SubmissionDatatypeFixer
     end
     return result(ont, sub, :would_fix, changes: changes) if @dry_run
 
-    # Goo deletes only the values it loaded, in the form it loaded them, so remove the
-    # stored triples of the repaired attributes first and let save write the new ones.
-    fixed_attrs.each { |attr| delete_stored_values(sub, attr) }
     sub.save
+    # Goo deletes only the values it loaded, in the form it loaded them, which can miss
+    # the stored literals. Remove whatever old triples are left, then check what's stored.
+    delete_stale_values(sub, fixed)
+    leftovers = fixed.keys.reject { |attr| clean?(sub, attr) }
+    unless leftovers.empty?
+      return result(ont, sub, :error, "saved, but #{leftovers.join(', ')} still hold old values",
+                    changes: changes)
+    end
+
     result(ont, sub, :fixed, changes: changes)
-  rescue StandardError => e
+  rescue Exception => e # goo raises plain Exception, not StandardError
+    raise unless e.is_a?(StandardError) || e.instance_of?(Exception)
+
     result(ont, sub, :error, "#{e.class}: #{e.message}", changes: changes)
   end
 
@@ -165,17 +175,27 @@ class SubmissionDatatypeFixer
   # The value to assign, or :unchanged when the stored values are already valid URIs
   # under the model's predicate
   def repaired_value(attr, settings, stored)
-    model_predicate = predicates(attr).first
     if stored.empty?
-      return settings[:is_required] ? RDF::URI.new(DEFAULT_URI) : :unchanged
+      return required?(attr) ? RDF::URI.new(DEFAULT_URI) : :unchanged
     end
-
-    already_valid = stored.all? { |predicate, term| predicate == model_predicate && valid_uri_term?(term) }
-    already_valid &&= stored.length == 1 if settings[:is_single]
-    return :unchanged if already_valid
+    return :unchanged if clean_values?(attr, settings, stored)
 
     repaired = stored.map { |_, term| fix_invalid_uri(term.to_s, attr) }.uniq
     settings[:is_single] ? repaired.first : repaired
+  end
+
+  def clean_values?(attr, settings, stored)
+    model_predicate = predicates(attr).first
+    clean = stored.all? { |predicate, term| predicate == model_predicate && valid_uri_term?(term) }
+    clean && (!settings[:is_single] || stored.length <= 1)
+  end
+
+  def clean?(sub, attr)
+    clean_values?(attr, URI_ATTRIBUTES_TO_FIX[attr], stored_values(sub, attr))
+  end
+
+  def required?(attr)
+    Array(LinkedData::Models::OntologySubmission.attribute_settings(attr)[:enforce]).include?(:existence)
   end
 
   def valid_uri_term?(term)
@@ -201,13 +221,21 @@ class SubmissionDatatypeFixer
     RDF::URI.new(DEFAULT_URI)
   end
 
-  def delete_stored_values(sub, attr)
-    predicates(attr).each do |predicate|
-      Goo.sparql_update_client.update(<<~SPARQL)
-        DELETE { GRAPH <#{sub.graph}> { <#{sub.id}> <#{predicate}> ?o . } }
-        WHERE { GRAPH <#{sub.graph}> { <#{sub.id}> <#{predicate}> ?o . } }
-      SPARQL
+  # Deletes the exact stored triples that the new values replaced. delete_data names the
+  # graph, so goo can invalidate its query cache; goo refuses plain-string updates when
+  # the cache is on.
+  def delete_stale_values(sub, fixed)
+    stale = RDF::Graph.new
+    fixed.each do |attr, (stored, new_value)|
+      model_predicate = predicates(attr).first
+      kept = Array(new_value)
+      stored.each do |predicate, term|
+        next if predicate == model_predicate && term.is_a?(RDF::URI) && kept.include?(term)
+
+        stale << [sub.id, predicate, term]
+      end
     end
+    Goo.sparql_update_client.delete_data(stale, graph: sub.graph) unless stale.empty?
   end
 
   # Older versions of the submission model raised from valid? when an upload file was
@@ -243,7 +271,7 @@ class SubmissionDatatypeFixer
   def describe(values)
     return 'none' if values.empty?
 
-    values.map { |v| v.is_a?(RDF::Literal) ? v.inspect : "<#{v}>" }.join(', ')
+    values.map(&:to_ntriples).join(', ')
   end
 
   def result(ont, sub, status, message = nil, changes: [])
