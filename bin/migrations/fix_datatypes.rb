@@ -38,6 +38,9 @@ class SubmissionDatatypeFixer
 
   FAILED = %i[invalid error].freeze
   URL_IN_TEXT = %r{https?://[^\s<>"'{}|\\^`]+}i
+  # RDF::URI#valid? accepts these, but they are not allowed in a SPARQL IRI; N-Triples escapes
+  # them as \uXXXX, which AllegroGraph rejects
+  NOT_IN_IRI = /[\x00-\x20<>"{}|\\^`]/
   DOI_IN_TEXT = %r{\b(?:doi:\s*)?(10\.\d{4,9}/[^\s<>"']+)}i
   TRAILING_PUNCTUATION = /[.,;:)\]]+\z/
 
@@ -228,11 +231,11 @@ class SubmissionDatatypeFixer
     end
 
     uri = RDF::URI.new(cleaned)
-    return [uri] if uri.valid?
+    return [uri] if storable?(uri)
 
     unless cleaned.match?(%r{\Ahttps?://}) || cleaned.match?(/\s/)
       corrected = RDF::URI.new("#{default_scheme}://#{cleaned}")
-      return [corrected] if corrected.valid?
+      return [corrected] if storable?(corrected)
     end
 
     # Free text such as a citation: keep the URLs or DOIs it mentions
@@ -244,7 +247,7 @@ class SubmissionDatatypeFixer
 
     # A URI followed by junk, such as "urn:lsid:bioontology.org:ENVO|$Revision 1.34$"
     leading = cleaned.split(/[|\s]/).first.to_s
-    if leading.match?(/\A[a-z][a-z0-9+.-]*:\S/i) && RDF::URI.new(leading).valid?
+    if leading.match?(/\A[a-z][a-z0-9+.-]*:\S/i) && storable?(RDF::URI.new(leading))
       @logger.warn("#{attr}: using #{leading} from the start of '#{value}'")
       return [RDF::URI.new(leading)]
     end
@@ -258,7 +261,11 @@ class SubmissionDatatypeFixer
     if found.empty?
       found = text.scan(DOI_IN_TEXT).map { |(doi)| "https://doi.org/#{doi.sub(TRAILING_PUNCTUATION, '')}" }
     end
-    found.uniq.map { |candidate| RDF::URI.new(candidate) }.select(&:valid?)
+    found.uniq.map { |candidate| RDF::URI.new(candidate) }.select { |uri| storable?(uri) }
+  end
+
+  def storable?(uri)
+    uri.valid? && !uri.to_s.match?(NOT_IN_IRI)
   end
 
   # Writes the repaired values with INSERT DATA / DELETE DATA on the exact stored terms

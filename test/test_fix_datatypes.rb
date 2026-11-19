@@ -166,6 +166,21 @@ class TestFixDatatypes < TestCase
     assert_equal [RDF::URI.new('urn:lsid:bioontology.org:ENVO')], stored(sub, URI_PREDICATE)
   end
 
+  def test_a_uri_with_a_version_after_a_pipe_keeps_the_uri
+    # RDF::URI#valid? accepts '|', but AllegroGraph rejects the escaped form N-Triples writes
+    first, second = submissions('FIXDT-0')
+    clear(first, URI_PREDICATE)
+    store(first, URI_PREDICATE, RDF::Literal.new('urn:lsid:bioontology.org:cell|UNASSIGNED'))
+    clear(second, URI_PREDICATE)
+    store(second, URI_PREDICATE, RDF::Literal.new('http://onto.example.org/bro.owl#|??'))
+
+    results = fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [:fixed, :fixed, :ok], results.map(&:status), results.join("\n")
+    assert_equal [RDF::URI.new('urn:lsid:bioontology.org:cell')], stored(first, URI_PREDICATE)
+    assert_equal [RDF::URI.new('http://onto.example.org/bro.owl#')], stored(second, URI_PREDICATE)
+  end
+
   def test_each_value_is_stored_once
     # AllegroGraph keeps duplicate triples; 4store collapses them, so there this checks
     # only that a value that was already a valid URI isn't lost
