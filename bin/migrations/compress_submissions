@@ -195,6 +195,7 @@ class SubmissionCompressor
     subs = query.include(:submissionId, :uploadFilePath, :masterFileName, submissionStatus: [:code],
                          ontology: [:acronym])
                 .all
+    subs = without_broken(subs)
 
     subs = in_group(subs) if @group
     subs = named(subs, acronyms) if acronyms
@@ -208,6 +209,23 @@ class SubmissionCompressor
       subs -= unarchived
     end
     subs.sort_by { |s| [s.ontology.acronym, s.submissionId] }
+  end
+
+  # Submissions whose ontology is gone, or whose submissionId is missing or not an
+  # integer, can't be matched to a repository folder. They are listed and left alone.
+  def without_broken(subs)
+    broken, ok = subs.partition { |s| acronym_of(s).nil? || !s.submissionId.is_a?(Integer) }
+    unless broken.empty?
+      @logger.warn("Skipping #{broken.length} submissions with no ontology or no integer submissionId:\n  " \
+                   "#{broken.map { |s| s.id.to_s }.sort.join("\n  ")}")
+    end
+    ok
+  end
+
+  def acronym_of(sub)
+    sub.ontology&.acronym
+  rescue Goo::Base::AttributeNotLoaded
+    nil
   end
 
   def ontology_format

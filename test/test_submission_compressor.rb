@@ -149,6 +149,25 @@ class TestSubmissionCompressor < TestCase
     assert_equal "#{original}.gz", paths('GZIPME-0').first
   end
 
+  def test_submission_without_an_ontology_is_skipped
+    orphan = submissions('GZIPME-0').first
+    model = LinkedData::Models::OntologySubmission
+    ont = LinkedData::Models::Ontology.find('GZIPME-0').first
+    triple = "GRAPH <#{model.uri_type}> { <#{orphan.id}> <#{model.attribute_uri(:ontology)}> <#{ont.id}> }"
+    Goo.sparql_update_client.update("DELETE DATA { #{triple} }")
+    log = StringIO.new
+
+    results = SubmissionCompressor.new(logger: Logger.new(log)).run(acronyms: ['GZIPME-0'])
+
+    assert_equal [['GZIPME-0', 2]], results.map { |r| [r.acronym, r.submission_id] }
+    assert_includes log.string, 'Skipping 1 submissions with no ontology or no integer submissionId'
+    assert_includes log.string, orphan.id.to_s
+    assert File.exist?(orphan.uploadFilePath.to_s)
+  ensure
+    # Relink it so teardown deletes it with its ontology
+    Goo.sparql_update_client.update("INSERT DATA { #{triple} }") if triple
+  end
+
   def test_zip_archive_type
     originals = paths('GZIPME-0')
 
