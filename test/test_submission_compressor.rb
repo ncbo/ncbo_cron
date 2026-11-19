@@ -149,6 +149,28 @@ class TestSubmissionCompressor < TestCase
     assert_equal "#{original}.gz", paths('GZIPME-0').first
   end
 
+  def test_zip_archive_type
+    originals = paths('GZIPME-0')
+
+    results = compressor(group: 'UMLS', archive_type: 'zip').run
+
+    assert_equal [:compressed, :compressed], results.map(&:status), results.join("\n")
+    sub = submissions('GZIPME-0').first
+    assert_equal "#{originals.first}.zip", sub.uploadFilePath.to_s
+    assert LinkedData::Utils::FileHelpers.zip?(sub.uploadFilePath.to_s)
+    assert_equal 'GZIPME.ttl', sub.masterFileName
+    refute File.exist?(originals.first)
+
+    sub.bring_remaining
+    sub.unzip_submission(Logger.new(StringIO.new))
+    assert_equal TURTLE * 50, File.read(sub.master_file_path)
+  end
+
+  def test_unknown_archive_type_is_rejected
+    error = assert_raises(ArgumentError) { compressor(archive_type: 'bz2') }
+    assert_equal 'Unknown archive type "bz2"', error.message
+  end
+
   def test_file_outside_the_submission_folder_is_left_alone
     sub = submissions('GZIPME-0').first
     sub.bring_remaining

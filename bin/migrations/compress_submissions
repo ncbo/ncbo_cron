@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 
-# One-off migration: gzips the uploaded files of old submissions and points their
-# uploadFilePath/masterFileName at the archive, so downloads and processing read the
-# compressed file.
+# One-off migration: compresses the uploaded files of old submissions (gzip by default,
+# zip with --archive-type zip) and points their uploadFilePath/masterFileName at the
+# archive, so downloads and processing read the compressed file.
 #
 # The archiver (OntologySubmissionArchiver) already zips an uploaded file of 100MB or
 # more when it archives a submission. This catches up on what it missed: submissions
@@ -21,7 +21,7 @@
 #
 #   bin/migrations/compress_submissions -o GO-PLUS --dryrun
 #   bin/migrations/compress_submissions -g UMLS
-#   bin/migrations/compress_submissions --all --min-size 100MB
+#   bin/migrations/compress_submissions --all --min-size 100MB --archive-type zip
 #
 # Everything is in this file so the migration can be deleted once it has run.
 # test/test_submission_compressor.rb loads it without running the command line.
@@ -31,6 +31,7 @@ require 'fileutils'
 
 class SubmissionCompressor
   FAILED = %i[missing invalid error].freeze
+  ARCHIVE_TYPES = %w[gz zip].freeze
 
   Result = Struct.new(:acronym, :submission_id, :status, :message, :size_before, :size_after,
                       keyword_init: true) do
@@ -53,8 +54,11 @@ class SubmissionCompressor
   # format: only submissions in this ontology format (acronym), e.g. OWL
   # min_size: leave files smaller than this many bytes alone
   # include_unarchived: also compress submissions that are not archived, the latest included
+  # archive_type: 'gz' (gzip) or 'zip' (what the archiver writes)
   def initialize(logger: Logger.new($stdout), dry_run: false, keep_original: false, redis: nil,
-                 group: nil, format: nil, min_size: 0, include_unarchived: false)
+                 group: nil, format: nil, min_size: 0, include_unarchived: false, archive_type: 'gz')
+    raise ArgumentError, "Unknown archive type #{archive_type.inspect}" unless ARCHIVE_TYPES.include?(archive_type)
+
     @logger = logger
     @dry_run = dry_run
     @keep_original = keep_original
@@ -63,6 +67,7 @@ class SubmissionCompressor
     @format = format
     @min_size = min_size
     @include_unarchived = include_unarchived
+    @archive_type = archive_type
     @results = []
   end
 
@@ -98,8 +103,12 @@ class SubmissionCompressor
     return result(sub, :queued, 'queued for processing, run again once it is processed') if queued?(sub)
     return result(sub, :would_compress, path, size_before: size_before) if @dry_run
 
-    gz_path = LinkedData::Utils::FileHelpers.gzip_file(path)
-    repoint(sub, path, gz_path, size_before)
+    archive_path = if @archive_type == 'zip'
+                     LinkedData::Utils::FileHelpers.zip_file(path)
+                   else
+                     LinkedData::Utils::FileHelpers.gzip_file(path)
+                   end
+    repoint(sub, path, archive_path, size_before)
   rescue StandardError => e
     result(sub, :error, "#{e.class}: #{e.message}")
   end
@@ -148,16 +157,16 @@ class SubmissionCompressor
 
   private
 
-  def repoint(sub, path, gz_path, size_before)
+  def repoint(sub, path, archive_path, size_before)
     sub.bring_remaining
     old_master = sub.masterFileName
-    sub.uploadFilePath = gz_path
-    sub.masterFileName = LinkedData::Utils::FileHelpers.filenames_in_archive(gz_path).first
+    sub.uploadFilePath = archive_path
+    sub.masterFileName = LinkedData::Utils::FileHelpers.filenames_in_archive(archive_path).first
 
     unless sub.valid?
       sub.uploadFilePath = path
       sub.masterFileName = old_master
-      FileUtils.rm_f(gz_path)
+      FileUtils.rm_f(archive_path)
       return result(sub, :invalid, "not saved: #{sub.errors.inspect}")
     end
 
@@ -166,18 +175,18 @@ class SubmissionCompressor
     rescue StandardError
       # The store may hold either path now, or neither if the save failed between
       # its delete and its insert. Keep both files unless it still holds the original.
-      FileUtils.rm_f(gz_path) if stored_upload_path(sub) == path
+      FileUtils.rm_f(archive_path) if stored_upload_path(sub) == path
       raise
     end
 
     stored = stored_upload_path(sub)
-    unless stored == gz_path
+    unless stored == archive_path
       return result(sub, :error, "uploadFilePath reads back as #{stored.inspect} after saving; " \
-                                 "kept #{path} and #{gz_path}")
+                                 "kept #{path} and #{archive_path}")
     end
 
     FileUtils.rm_f(path) unless @keep_original
-    result(sub, :compressed, File.basename(gz_path), size_before: size_before, size_after: File.size(gz_path))
+    result(sub, :compressed, File.basename(archive_path), size_before: size_before, size_after: File.size(archive_path))
   end
 
   def select_submissions(acronyms)
@@ -274,7 +283,7 @@ if $PROGRAM_NAME == __FILE__
   require 'optparse'
 
   options = { dry_run: false, keep_original: false, ontologies: nil, logfile: nil, group: nil,
-              format: nil, min_size: 0, include_unarchived: false, all: false }
+              format: nil, min_size: 0, include_unarchived: false, all: false, archive_type: 'gz' }
   parser = OptionParser.new do |opts|
     opts.banner = "Usage: #{File.basename(__FILE__)} (-o ACRONYMS | -g GROUP | -f FORMAT | --all) [options]"
     opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only these ontologies') do |acronyms|
@@ -290,6 +299,8 @@ if $PROGRAM_NAME == __FILE__
       options[:include_unarchived] = true
     end
     opts.on('-d', '--dryrun', 'List what would be compressed; change nothing') { options[:dry_run] = true }
+    opts.on('-t', '--archive-type TYPE', SubmissionCompressor::ARCHIVE_TYPES,
+            "gz or zip (default: gz; the archiver writes zip)") { |type| options[:archive_type] = type }
     opts.on('-k', '--keep-original', 'Keep the uncompressed file next to the archive') { options[:keep_original] = true }
     opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
     opts.on('-h', '--help', 'Display this screen') do
@@ -297,7 +308,11 @@ if $PROGRAM_NAME == __FILE__
       exit
     end
   end
-  parser.parse!
+  begin
+    parser.parse!
+  rescue OptionParser::ParseError, ArgumentError => e
+    abort("#{e.message}\n\n#{parser}")
+  end
 
   unless options[:all] || options[:ontologies] || options[:group] || options[:format]
     abort("Say which ontologies to compress with -o, -g, -f or --all\n\n#{parser}")
@@ -323,7 +338,8 @@ if $PROGRAM_NAME == __FILE__
                                         group: options[:group],
                                         format: options[:format],
                                         min_size: options[:min_size],
-                                        include_unarchived: options[:include_unarchived])
+                                        include_unarchived: options[:include_unarchived],
+                                        archive_type: options[:archive_type])
   compressor.run(acronyms: options[:ontologies])
 
   failures = compressor.failures
