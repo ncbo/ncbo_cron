@@ -2,6 +2,9 @@ require_relative 'test_case'
 require 'redis'
 require 'zlib'
 
+# The migration is a standalone script; load it without running its command line
+load File.expand_path('../bin/migrations/compress_umls_submissions', __dir__)
+
 class TestUmlsSubmissionCompressor < TestCase
   TURTLE = <<~TTL.freeze
     @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -138,7 +141,7 @@ class TestUmlsSubmissionCompressor < TestCase
   private
 
   def compressor(**options)
-    NcboCron::Models::UmlsSubmissionCompressor.new(logger: Logger.new(StringIO.new), **options)
+    UmlsSubmissionCompressor.new(logger: Logger.new(StringIO.new), **options)
   end
 
   def create(acronym:, format:, submission_count:, file_path:)
