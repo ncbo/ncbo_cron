@@ -8,9 +8,9 @@
 # Every submission of every ontology is checked, not only the latest. Values are read
 # straight from the triplestore, because goo may load a literal as a String, which the
 # URI validator rejects. Only submissions that need a change are written, and only after
-# the repaired submission passes validation, so the script is safe to re-run. The old
-# triples are removed after the save, so a failure part way leaves extra values behind,
-# never missing ones; a re-run cleans them up.
+# the repaired submission passes validation, so the script is safe to re-run. New values
+# are written before the old ones are removed, so a failure part way leaves extra values
+# behind, never missing ones; a re-run cleans them up.
 #
 #   bin/migrations/fix_datatypes.rb --dryrun
 #   bin/migrations/fix_datatypes.rb -o ICD10CM,SNOMEDCT
@@ -37,6 +37,9 @@ class SubmissionDatatypeFixer
   }.freeze
 
   FAILED = %i[invalid error].freeze
+  URL_IN_TEXT = %r{https?://[^\s<>"'{}|\\^`]+}i
+  DOI_IN_TEXT = %r{\b(?:doi:\s*)?(10\.\d{4,9}/[^\s<>"']+)}i
+  TRAILING_PUNCTUATION = /[.,;:)\]]+\z/
 
   Result = Struct.new(:acronym, :submission_id, :status, :changes, :message, keyword_init: true) do
     def failed?
@@ -71,7 +74,13 @@ class SubmissionDatatypeFixer
       submissions_of(ont).each do |sub|
         result = fix(ont, sub)
         @results << result
-        result.failed? ? @logger.error(result.to_s) : @logger.info(result.to_s)
+        if result.failed?
+        @logger.error(result.to_s)
+      elsif result.status.to_s.end_with?('still_invalid')
+        @logger.warn(result.to_s)
+      else
+        @logger.info(result.to_s)
+      end
       end
     end
 
@@ -100,29 +109,37 @@ class SubmissionDatatypeFixer
       changes << "#{attr}: #{describe(stored.map(&:last))} -> #{describe(Array(new_value))}"
     end
 
-    if sub.contact.nil? || sub.contact.empty?
+    add_contact = sub.contact.nil? || sub.contact.empty?
+    if add_contact
       sub.contact = [fallback_contact]
       changes << "contact: none -> #{UNKNOWN_CONTACT[:email]}"
     end
 
     return result(ont, sub, :ok) if changes.empty?
 
+    # The repair is written as triples, so errors in attributes it doesn't touch (a bad
+    # version, an ftp pullLocation) don't block it; those submissions are reported.
+    other_errors = nil
     unless submission_valid?(sub)
-      return result(ont, sub, :invalid, "not saved: #{sub.errors}", changes: changes)
+      touched = fixed.keys + (add_contact ? [:contact] : [])
+      errors = sub.errors || {}
+      if errors.empty? || (errors.keys & touched).any?
+        return result(ont, sub, :invalid, "not fixed: #{sub.errors}", changes: changes)
+      end
+      other_errors = "other invalid attributes: #{sub.errors}"
     end
-    return result(ont, sub, :would_fix, changes: changes) if @dry_run
+    if @dry_run
+      return result(ont, sub, other_errors ? :would_fix_still_invalid : :would_fix, other_errors, changes: changes)
+    end
 
-    sub.save
-    # Goo deletes only the values it loaded, in the form it loaded them, which can miss
-    # the stored literals. Remove whatever old triples are left, then check what's stored.
-    delete_stale_values(sub, fixed)
+    write_repaired_values(sub, fixed, add_contact: add_contact)
     leftovers = fixed.keys.reject { |attr| clean?(sub, attr) }
     unless leftovers.empty?
       return result(ont, sub, :error, "saved, but #{leftovers.join(', ')} still hold old values",
                     changes: changes)
     end
 
-    result(ont, sub, :fixed, changes: changes)
+    result(ont, sub, other_errors ? :fixed_still_invalid : :fixed, other_errors, changes: changes)
   rescue Exception => e # goo raises plain Exception, not StandardError
     raise unless e.is_a?(StandardError) || e.instance_of?(Exception)
 
@@ -180,14 +197,14 @@ class SubmissionDatatypeFixer
     end
     return :unchanged if clean_values?(attr, settings, stored)
 
-    repaired = stored.map { |_, term| fix_invalid_uri(term.to_s, attr) }.uniq
+    repaired = stored.flat_map { |_, term| fix_invalid_uri(term.to_s, attr) }.uniq
     settings[:is_single] ? repaired.first : repaired
   end
 
   def clean_values?(attr, settings, stored)
     model_predicate = predicates(attr).first
     clean = stored.all? { |predicate, term| predicate == model_predicate && valid_uri_term?(term) }
-    clean && (!settings[:is_single] || stored.length <= 1)
+    clean && stored.uniq.length == stored.length && (!settings[:is_single] || stored.length <= 1)
   end
 
   def clean?(sub, attr)
@@ -202,40 +219,80 @@ class SubmissionDatatypeFixer
     term.is_a?(RDF::URI) && term.valid?
   end
 
+  # The URIs to store for one stored value
   def fix_invalid_uri(value, attr, default_scheme: 'http')
     cleaned = value.to_s.strip
     if cleaned.empty?
       @logger.warn("#{attr}: empty value replaced with #{DEFAULT_URI}")
-      return RDF::URI.new(DEFAULT_URI)
+      return [RDF::URI.new(DEFAULT_URI)]
     end
 
     uri = RDF::URI.new(cleaned)
-    return uri if uri.valid?
+    return [uri] if uri.valid?
 
-    unless cleaned.match?(%r{\Ahttps?://})
+    unless cleaned.match?(%r{\Ahttps?://}) || cleaned.match?(/\s/)
       corrected = RDF::URI.new("#{default_scheme}://#{cleaned}")
-      return corrected if corrected.valid?
+      return [corrected] if corrected.valid?
+    end
+
+    # Free text such as a citation: keep the URLs or DOIs it mentions
+    embedded = embedded_uris(cleaned)
+    unless embedded.empty?
+      @logger.warn("#{attr}: using #{embedded.map(&:to_s).join(', ')} found in '#{value}'")
+      return embedded
     end
 
     @logger.warn("#{attr}: '#{value}' is not a valid URI, replaced with #{DEFAULT_URI}")
-    RDF::URI.new(DEFAULT_URI)
+    [RDF::URI.new(DEFAULT_URI)]
   end
 
-  # Deletes the exact stored triples that the new values replaced. delete_data names the
-  # graph, so goo can invalidate its query cache; goo refuses plain-string updates when
-  # the cache is on.
-  def delete_stale_values(sub, fixed)
-    stale = RDF::Graph.new
+  def embedded_uris(text)
+    found = text.scan(URL_IN_TEXT).map { |url| url.sub(TRAILING_PUNCTUATION, '') }
+    if found.empty?
+      found = text.scan(DOI_IN_TEXT).map { |(doi)| "https://doi.org/#{doi.sub(TRAILING_PUNCTUATION, '')}" }
+    end
+    found.uniq.map { |candidate| RDF::URI.new(candidate) }.select(&:valid?)
+  end
+
+  # Writes the repaired values with INSERT DATA / DELETE DATA on the exact stored terms
+  # instead of goo's save. Goo deletes only the values it loaded, in the form it loaded
+  # them, and on AllegroGraph, which keeps duplicate triples, re-inserting a value that is
+  # already stored adds a second copy. Both calls name the graph, so goo can invalidate its
+  # query cache; goo refuses plain-string updates when the cache is on.
+  #
+  # New values go in before old ones come out. A kept value that is stored more than once
+  # is deleted (removing every copy) and inserted once again.
+  def write_repaired_values(sub, fixed, add_contact:)
+    insert = RDF::Graph.new
+    delete = RDF::Graph.new
+    reinsert = RDF::Graph.new
+
     fixed.each do |attr, (stored, new_value)|
       model_predicate = predicates(attr).first
       kept = Array(new_value)
+      current = stored.select { |predicate, term| predicate == model_predicate && term.is_a?(RDF::URI) }.map(&:last)
+      kept.each do |term|
+        copies = current.count { |t| t == term }
+        insert << [sub.id, model_predicate, term] if copies.zero?
+        next unless copies > 1
+
+        delete << [sub.id, model_predicate, term]
+        reinsert << [sub.id, model_predicate, term]
+      end
       stored.each do |predicate, term|
         next if predicate == model_predicate && term.is_a?(RDF::URI) && kept.include?(term)
 
-        stale << [sub.id, predicate, term]
+        delete << [sub.id, predicate, term]
       end
     end
-    Goo.sparql_update_client.delete_data(stale, graph: sub.graph) unless stale.empty?
+    if add_contact
+      insert << [sub.id, LinkedData::Models::OntologySubmission.attribute_uri(:contact), fallback_contact.id]
+    end
+
+    client = Goo.sparql_update_client
+    client.insert_data(insert, graph: sub.graph) unless insert.empty?
+    client.delete_data(delete, graph: sub.graph) unless delete.empty?
+    client.insert_data(reinsert, graph: sub.graph) unless reinsert.empty?
   end
 
   # Older versions of the submission model raised from valid? when an upload file was

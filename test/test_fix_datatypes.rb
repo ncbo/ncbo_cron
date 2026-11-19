@@ -119,15 +119,56 @@ class TestFixDatatypes < TestCase
     Goo.use_cache = false
   end
 
-  def test_failed_save_keeps_the_stored_values
-    Submission.any_instance.stubs(:save).raises(Exception, 'store unavailable')
+  def test_failed_write_keeps_the_stored_values
+    Goo.sparql_update_client.stubs(:insert_data).raises(Exception, 'store unavailable')
 
     results = fixer.run(acronyms: ['FIXDT-0'])
 
-    Submission.any_instance.unstub(:save)
+    Goo.sparql_update_client.unstub(:insert_data)
     assert_equal [:error, :error, :ok], results.map(&:status)
     assert_includes results.first.message, 'store unavailable'
     assert_includes stored(submissions('FIXDT-0').first, PUBLICATION), RDF::Literal.new('http://pubs.example.org/1')
+  end
+
+  def test_unrelated_invalid_attribute_does_not_block_the_fix
+    sub = submissions('FIXDT-0').first
+    store(sub, Submission.attribute_uri(:version), RDF::Literal.new("v1\nwith a newline"))
+
+    dry = fixer(dry_run: true).run(acronyms: ['FIXDT-0']).first
+    assert_equal :would_fix_still_invalid, dry.status, dry.to_s
+    result = fixer.run(acronyms: ['FIXDT-0']).first
+
+    assert_equal :fixed_still_invalid, result.status, result.to_s
+    assert_includes result.message, 'version'
+    assert_equal %w[http://pubs.example.org/1 http://pubs.example.org/2], stored(sub, PUBLICATION).map(&:to_s).sort
+    assert(stored(sub, PUBLICATION).all? { |v| v.is_a?(RDF::URI) })
+  end
+
+  def test_urls_and_dois_in_citations_are_kept
+    sub = submissions('FIXDT-0').last
+    store(sub, PUBLICATION,
+          RDF::Literal.new('Smith J. An ontology. Sci Data. 2020;7:181. doi:10.1038/s41597-020-0523-6'),
+          RDF::Literal.new('Doe A. Another paper. https://example.org/paper/1.'))
+
+    fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal %w[https://doi.org/10.1038/s41597-020-0523-6 https://example.org/paper/1 http://pubs.example.org/latest],
+                 stored(sub, PUBLICATION).map(&:to_s).sort_by { |u| u.sub(%r{\Ahttps?://}, '') }
+  end
+
+  def test_each_value_is_stored_once
+    # AllegroGraph keeps duplicate triples; 4store collapses them, so there this checks
+    # only that a value that was already a valid URI isn't lost
+    latest = submissions('FIXDT-0').last
+    store(latest, PUBLICATION, RDF::Literal.new('http://pubs.example.org/extra'))
+    store(latest, PUBLICATION, RDF::URI.new('http://pubs.example.org/latest'))
+
+    fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal %w[http://pubs.example.org/extra http://pubs.example.org/latest],
+                 stored(latest, PUBLICATION).map(&:to_s).sort
+    first = submissions('FIXDT-0').first
+    assert_equal %w[http://pubs.example.org/1 http://pubs.example.org/2], stored(first, PUBLICATION).map(&:to_s).sort
   end
 
   def test_missing_contact_gets_the_unknown_contact
