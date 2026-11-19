@@ -216,6 +216,21 @@ class TestFixDatatypes < TestCase
     assert_empty stored(latest, PULL_LOCATION)
   end
 
+  def test_ftp_pull_location_is_kept_when_removal_is_off
+    assert SubmissionDatatypeFixer::REMOVE_FTP_PULL_LOCATIONS, 'removal is on by default'
+    first = submissions('FIXDT-0').first
+    clear(first, PULL_LOCATION)
+    store(first, PULL_LOCATION, RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo'))
+
+    result = fixer(remove_ftp_pull_locations: false).run(acronyms: ['FIXDT-0']).first
+
+    # The literal publication is still fixed; the ftp pull location keeps it invalid
+    assert_equal :fixed_still_invalid, result.status, result.to_s
+    assert_includes result.message, 'pullLocation'
+    assert_equal [RDF::Literal.new('ftp://ftp.example.org/pub/onto.obo')], stored(first, PULL_LOCATION)
+    assert(stored(first, PUBLICATION).all? { |v| v.is_a?(RDF::URI) })
+  end
+
   def test_each_value_is_stored_once
     # AllegroGraph keeps duplicate triples; 4store collapses them, so there this checks
     # only that a value that was already a valid URI isn't lost

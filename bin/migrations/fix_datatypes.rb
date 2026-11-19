@@ -1,9 +1,10 @@
 #!/usr/bin/env ruby
 
 # Migration: repairs ontology submissions whose URI-typed metadata (documentation,
-# homepage, publication, uri) is stored as plain literals or invalid URIs, and fills in
-# a missing contact, and removes ftp:// pull locations. Goo refuses to save such submissions, so anything that re-saves
-# them (processing, archiving, other migrations) fails validation.
+# homepage, publication, uri) is stored as plain literals or invalid URIs, fills in a
+# missing contact, and removes ftp:// pull locations (see REMOVE_FTP_PULL_LOCATIONS).
+# Goo refuses to save such submissions, so anything that re-saves them (processing,
+# archiving, other migrations) fails validation.
 #
 # Every submission of every ontology is checked, not only the latest. Values are read
 # straight from the triplestore, because goo may load a literal as a String, which the
@@ -36,8 +37,10 @@ class SubmissionDatatypeFixer
     uri: { is_single: true }
   }.freeze
 
-  # pullLocation is type :url, which accepts only http(s), and nothing pulls over ftp, so
-  # these values are removed rather than repaired
+  # pullLocation is type :url, which accepts only http(s), so a submission with an ftp://
+  # pull location fails validation. Those values are removed; set this to false to keep
+  # them. Only values that start with ftp:// match, not http(s) URLs with ftp in the path.
+  REMOVE_FTP_PULL_LOCATIONS = true
   FTP_PULL_LOCATION = %r{\Aftp://}i
 
   FAILED = %i[invalid error].freeze
@@ -63,10 +66,12 @@ class SubmissionDatatypeFixer
 
   attr_reader :results
 
-  def initialize(logger: Logger.new($stdout), dry_run: false, latest_only: false)
+  def initialize(logger: Logger.new($stdout), dry_run: false, latest_only: false,
+                 remove_ftp_pull_locations: REMOVE_FTP_PULL_LOCATIONS)
     @logger = logger
     @dry_run = dry_run
     @latest_only = latest_only
+    @remove_ftp_pull_locations = remove_ftp_pull_locations
     @results = []
   end
 
@@ -116,7 +121,7 @@ class SubmissionDatatypeFixer
       changes << "#{attr}: #{describe(stored.map(&:last))} -> #{describe(Array(new_value))}"
     end
 
-    ftp = ftp_pull_locations(sub)
+    ftp = @remove_ftp_pull_locations ? ftp_pull_locations(sub) : []
     unless ftp.empty?
       kept = stored_pull_locations(sub) - ftp
       sub.pullLocation = kept.empty? ? nil : RDF::URI.new(kept.first.to_s)
@@ -148,7 +153,7 @@ class SubmissionDatatypeFixer
 
     write_repaired_values(sub, fixed, add_contact: add_contact, removed_pull_locations: ftp)
     leftovers = fixed.keys.reject { |attr| clean?(sub, attr) }
-    leftovers << :pullLocation unless ftp_pull_locations(sub).empty?
+    leftovers << :pullLocation unless ftp.empty? || ftp_pull_locations(sub).empty?
     unless leftovers.empty?
       return result(ont, sub, :error, "saved, but #{leftovers.join(', ')} still hold old values",
                     changes: changes)
