@@ -156,6 +156,16 @@ class TestFixDatatypes < TestCase
                  stored(sub, PUBLICATION).map(&:to_s).sort_by { |u| u.sub(%r{\Ahttps?://}, '') }
   end
 
+  def test_a_uri_followed_by_junk_keeps_the_uri
+    sub = submissions('FIXDT-0').first
+    clear(sub, URI_PREDICATE)
+    store(sub, URI_PREDICATE, RDF::Literal.new('urn:lsid:bioontology.org:ENVO|$Revision 1.34$'))
+
+    fixer.run(acronyms: ['FIXDT-0'])
+
+    assert_equal [RDF::URI.new('urn:lsid:bioontology.org:ENVO')], stored(sub, URI_PREDICATE)
+  end
+
   def test_each_value_is_stored_once
     # AllegroGraph keeps duplicate triples; 4store collapses them, so there this checks
     # only that a value that was already a valid URI isn't lost

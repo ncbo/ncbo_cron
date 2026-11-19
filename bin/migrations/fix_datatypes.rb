@@ -242,6 +242,13 @@ class SubmissionDatatypeFixer
       return embedded
     end
 
+    # A URI followed by junk, such as "urn:lsid:bioontology.org:ENVO|$Revision 1.34$"
+    leading = cleaned.split(/[|\s]/).first.to_s
+    if leading.match?(/\A[a-z][a-z0-9+.-]*:\S/i) && RDF::URI.new(leading).valid?
+      @logger.warn("#{attr}: using #{leading} from the start of '#{value}'")
+      return [RDF::URI.new(leading)]
+    end
+
     @logger.warn("#{attr}: '#{value}' is not a valid URI, replaced with #{DEFAULT_URI}")
     [RDF::URI.new(DEFAULT_URI)]
   end
