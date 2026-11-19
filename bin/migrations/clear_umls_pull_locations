@@ -1,0 +1,226 @@
+#!/usr/bin/env ruby
+
+# One-off migration: removes leftover pullLocation values from UMLS submissions (SNOMEDCT,
+# NCIT, MESH, ...). Older UMLS releases were loaded by pulling them from the retired REST
+# API (http://rest.bioontology.org/bioportal/ontologies/download/<id>?apikey=<key>), and
+# those URLs, API key included, are still stored on the submissions. UMLS submissions are
+# now created from local umls2rdf output by bin/create_umls_submissions.rb, which copies
+# every attribute of the previous submission, so a leftover URL is carried into each new
+# release and the ontology pull job tries to pull it.
+#
+# What is cleared:
+#   - pullLocation on every UMLS submission that is not its ontology's latest
+#   - pullLocation on any UMLS submission, the latest included, whose URL is a legacy
+#     rest.bioontology.org download or carries an apikey
+# A latest submission with any other pullLocation is reported and left alone.
+#
+# A submission is only saved if it is still valid without its pullLocation; invalid ones are
+# reported and skipped. API keys are masked in the log. Safe to re-run: submissions without
+# a pullLocation are left alone.
+#
+#   bin/migrations/clear_umls_pull_locations --dryrun
+#   bin/migrations/clear_umls_pull_locations -o MESH,SNOMEDCT
+#   bin/migrations/clear_umls_pull_locations
+#
+# Everything is in this file so the migration can be deleted once it has run.
+# test/test_umls_pull_location_cleaner.rb loads it without running the command line.
+
+require 'logger'
+require 'uri'
+
+class UmlsPullLocationCleaner
+  FAILED = %i[invalid error].freeze
+  ATTENTION = %i[kept_latest].freeze
+  LEGACY_HOST = 'rest.bioontology.org'.freeze
+
+  Result = Struct.new(:acronym, :submission_id, :status, :message, :pull_location, keyword_init: true) do
+    def failed?
+      FAILED.include?(status)
+    end
+
+    def attention?
+      ATTENTION.include?(status)
+    end
+
+    def to_s
+      line = "#{acronym}/#{submission_id}: #{status}"
+      line += " (#{message})" if message
+      line += " #{UmlsPullLocationCleaner.mask(pull_location)}" if pull_location
+      line
+    end
+  end
+
+  attr_reader :results
+
+  def initialize(logger: Logger.new($stdout), dry_run: false)
+    @logger = logger
+    @dry_run = dry_run
+    @results = []
+  end
+
+  # acronyms limits the run to those ontologies; nil means every UMLS ontology
+  def run(acronyms: nil)
+    @results = []
+    submissions = umls_submissions(acronyms)
+    @logger.info("Found #{submissions.length} UMLS submissions#{' (dry run)' if @dry_run}")
+    latest_ids = latest_submission_ids(submissions)
+
+    submissions.each do |sub|
+      result = clean(sub, latest: latest_ids.include?(sub.id.to_s))
+      @results << result
+      log(result)
+    end
+    @logger.info(summary)
+    @results
+  end
+
+  def clean(sub, latest:)
+    location = sub.pullLocation&.to_s
+    return result(sub, :no_pull_location) if location.nil? || location.empty?
+
+    legacy = self.class.legacy?(location)
+    return result(sub, :kept_latest, 'latest submission; not a legacy URL', location) if latest && !legacy
+
+    reason = legacy ? 'legacy REST URL' : 'older submission'
+    return result(sub, :would_clear, reason, location) if @dry_run
+
+    clear(sub, location, reason)
+  rescue StandardError => e
+    result(sub, :error, "#{e.class}: #{self.class.mask(e.message)}", location)
+  end
+
+  def summary
+    counts = @results.group_by(&:status).transform_values(&:length)
+    lines = ['UMLS pullLocation cleanup summary:']
+    counts.sort_by { |status, _| status.to_s }.each { |status, n| lines << "  #{status}: #{n}" }
+    kept = @results.select(&:attention?)
+    lines << "  latest submissions whose pullLocation was kept:\n    #{kept.join("\n    ")}" unless kept.empty?
+    lines.join("\n")
+  end
+
+  def failures
+    @results.select(&:failed?)
+  end
+
+  # A download URL from the retired REST API, or any URL that carries an API key
+  def self.legacy?(location)
+    return true if location =~ /[?&;]apikey=/i
+
+    host = URI.parse(location).host
+    !host.nil? && host.casecmp?(LEGACY_HOST)
+  rescue URI::InvalidURIError
+    location.downcase.include?(LEGACY_HOST)
+  end
+
+  def self.mask(text)
+    text.to_s.gsub(/(apikey=)[^&#;\s"']*/i, '\1***')
+  end
+
+  private
+
+  def clear(sub, location, reason)
+    sub.bring_remaining
+    sub.pullLocation = nil
+
+    unless sub.valid?
+      sub.pullLocation = location
+      return result(sub, :invalid, "not saved: #{self.class.mask(sub.errors.inspect)}", location)
+    end
+
+    sub.save
+    stored = stored_pull_location(sub)
+    return result(sub, :error, 'pullLocation still stored after saving', stored) unless stored.nil?
+
+    result(sub, :cleared, reason, location)
+  end
+
+  def log(result)
+    if result.failed?
+      @logger.error(result.to_s)
+    elsif result.attention?
+      @logger.warn(result.to_s)
+    else
+      @logger.info(result.to_s)
+    end
+  end
+
+  def umls_submissions(acronyms)
+    umls = LinkedData::Models::OntologyFormat.find('UMLS').first
+    raise ArgumentError, 'The UMLS ontology format is not in the triplestore' if umls.nil?
+
+    subs = LinkedData::Models::OntologySubmission.where(hasOntologyLanguage: umls)
+                                                 .include(:submissionId, :pullLocation, ontology: [:acronym])
+                                                 .all
+    if acronyms
+      wanted = acronyms.map(&:upcase)
+      subs = subs.select { |s| wanted.include?(s.ontology.acronym.upcase) }
+      found = subs.map { |s| s.ontology.acronym.upcase }.uniq
+      (wanted - found).each { |acr| @logger.warn("#{acr}: no UMLS submissions found") }
+    end
+    subs.sort_by { |s| [s.ontology.acronym, s.submissionId] }
+  end
+
+  # The submission the ontology pull job reads, per ontology: its highest submissionId,
+  # whatever its format or status
+  def latest_submission_ids(submissions)
+    submissions.map(&:ontology).uniq { |ont| ont.id.to_s }.filter_map do |ont|
+      ont.latest_submission(status: :any)&.id&.to_s
+    end
+  end
+
+  def stored_pull_location(sub)
+    stored = LinkedData::Models::OntologySubmission.find(sub.id).include(:pullLocation).first
+    location = stored&.pullLocation&.to_s
+    location.nil? || location.empty? ? nil : location
+  end
+
+  def result(sub, status, message = nil, pull_location = nil)
+    Result.new(acronym: sub.ontology.acronym, submission_id: sub.submissionId, status: status,
+               message: message, pull_location: pull_location)
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  # Exit cleanly from an early interrupt
+  Signal.trap("INT") { exit 1 }
+
+  require 'bundler/setup'
+  require 'optparse'
+
+  options = { dry_run: false, ontologies: nil, logfile: nil }
+  OptionParser.new do |opts|
+    opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
+    opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only these UMLS ontologies (default: all of them)') do |acronyms|
+      options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
+    end
+    opts.on('-d', '--dryrun', 'List what would be cleared; change nothing') { options[:dry_run] = true }
+    opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
+    opts.on('-h', '--help', 'Display this screen') do
+      puts opts
+      exit
+    end
+  end.parse!
+
+  require_relative '../../lib/ncbo_cron'
+  config_exists = File.exist?(File.expand_path('../../../config/config.rb', __FILE__))
+  abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+  require_relative '../../config/config'
+
+  outputs = [$stdout]
+  outputs << File.open(options[:logfile], 'a') if options[:logfile]
+  logger = Logger.new(Class.new {
+    define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
+    define_method(:close) { outputs.drop(1).each(&:close) }
+  }.new)
+
+  logger.info("Triplestore: #{LinkedData.settings.goo_host}")
+
+  cleaner = UmlsPullLocationCleaner.new(logger: logger, dry_run: options[:dry_run])
+  cleaner.run(acronyms: options[:ontologies])
+
+  failures = cleaner.failures
+  unless failures.empty?
+    logger.error("#{failures.length} submissions need attention:\n  #{failures.join("\n  ")}")
+    exit 1
+  end
+end
