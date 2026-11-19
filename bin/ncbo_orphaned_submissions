@@ -1,23 +1,49 @@
 #!/usr/bin/env ruby
 
-# Read-only report of OntologySubmission resources that have lost their link to an ontology:
-# typed submissions with no `ontology` triple, `ontology` triples pointing at a missing
-# ontology, and triples left in the submission graph with no rdf:type. Also lists Metrics
-# resources whose submission is gone. See OrphanedSubmissionsReport below.
+# Finds OntologySubmission resources that have lost their link to an ontology and, with
+# --remove, removes them:
+#   - typed submissions with no `ontology` triple, or one pointing at a missing ontology
+#   - triples left in the submission graph with no rdf:type
+#   - Metrics resources whose submission is gone
+# A typed orphan holding an ontology's next submission id makes every new submission of that
+# ontology (pulled or uploaded) fail as a duplicate. See OrphanedSubmissionsReport below for
+# the kinds and effects reported.
 #
-# Nothing is changed in the triplestore or the repository folder, so this is safe to run on
-# any environment. API keys in stored values are masked.
+# Without --remove nothing is changed, so a plain run is safe on any environment and shows
+# exactly what --remove would remove. API keys in stored values are masked in the output.
 #
 #   bin/ncbo_orphaned_submissions
 #   bin/ncbo_orphaned_submissions -o CDAO,EMAPA --details
 #   bin/ncbo_orphaned_submissions --csv orphans.csv
+#   bin/ncbo_orphaned_submissions --remove --blocking-only --backup orphans-blocking.nq
+#   bin/ncbo_orphaned_submissions --remove --backup orphans-all.nq
 #
-# Exits 1 when an orphan blocks new submissions of an ontology, 0 otherwise.
-
+# --remove, for each orphan (see OrphanedSubmissionRemover below):
+#   1. checks again that it's still an orphan; one that is linked again by now is skipped
+#   2. appends every triple of it, and of its Metrics record, to the --backup N-Quads file
+#   3. deletes those exact triples and checks they're gone (this also clears Goo's query cache
+#      for the graph)
+#   4. moves its folder <repository>/<ACRONYM>/<id>, if there is one, to the quarantine folder
+#      (default <repository>/.orphaned). Only the folder named by the orphan's own id is moved,
+#      never the folder its uploadFilePath points at.
+# Healthy submissions and ontologies are never touched. Run --remove when the ontology pull
+# isn't running: the pull writes into the folder of the id a blocking orphan holds.
+#
+# The backup holds the triples as stored, unmasked, so it can be restored exactly; it is
+# written with mode 0600. To restore on AllegroGraph:
+#   curl -X POST -H 'Content-Type: text/x-nquads' --data-binary @BACKUP.nq \
+#        http://<host>:10035/repositories/<repo>/statements
+# and move the folders back out of the quarantine folder.
+#
+# Exit codes: without --remove, 1 when an orphan blocks new submissions of an ontology;
+# with --remove, 1 when an orphan couldn't be removed. Otherwise 0.
+#
 # Everything is in this file; tests load it without running the command line.
 
+require 'fileutils'
 require 'logger'
 require 'set'
+require 'time'
 
 # Read-only report of OntologySubmission resources that have lost their link to an ontology.
 #
@@ -264,6 +290,184 @@ class OrphanedSubmissionsReport
   end
 end
 
+# Removes the orphans an OrphanedSubmissionsReport found: backs up their triples, deletes them,
+# and moves their folders to a quarantine folder. Each orphan is checked again right before
+# it's deleted, since the report may be minutes old.
+class OrphanedSubmissionRemover
+  FAILED = %i[error].freeze
+
+  Result = Struct.new(:id, :kind, :effect, :status, :triples, :metrics_triples, :folder, :moved_to, :message,
+                      keyword_init: true) do
+    def failed?
+      FAILED.include?(status)
+    end
+
+    def to_s
+      line = "#{id}: #{status} (#{kind}, #{effect}, #{triples.to_i} triples"
+      line += ", #{metrics_triples} metrics triples" if metrics_triples.to_i.positive?
+      line += ')'
+      line += " folder #{folder} -> #{moved_to}" if moved_to
+      line += " #{message}" if message
+      OrphanedSubmissionsReport.mask(line)
+    end
+  end
+
+  attr_reader :results
+
+  def initialize(backup:, logger: Logger.new($stdout), quarantine: nil,
+                 repository_folder: LinkedData.settings.repository_folder, report: nil)
+    raise ArgumentError, 'a backup file is required' if backup.nil? || backup.to_s.empty?
+
+    @logger = logger
+    @backup = backup.to_s
+    @repository_folder = repository_folder.to_s
+    @quarantine = (quarantine || File.join(@repository_folder, '.orphaned')).to_s
+    @report = report || OrphanedSubmissionsReport.new(logger: logger, repository_folder: @repository_folder)
+    @results = []
+  end
+
+  # blocking_only: only orphans that block their ontology's next submission
+  def run(acronyms: nil, blocking_only: false)
+    remove_from(@report.run(acronyms: acronyms), blocking_only: blocking_only)
+  end
+
+  def remove_from(report_result, blocking_only: false)
+    orphans = report_result.orphans
+    orphans = orphans.select { |o| o.effect == :blocks_next_submission } if blocking_only
+    remove(orphans, extra_metrics: blocking_only ? [] : report_result.orphaned_metrics)
+  end
+
+  # extra_metrics: orphaned Metrics ids whose submission isn't one of orphans (e.g. already gone)
+  def remove(orphans, extra_metrics: [])
+    @logger.info("Removing #{orphans.length} orphaned submissions, backup #{File.expand_path(@backup)}")
+    @results = []
+    covered = orphans.map { |o| metrics_id(o.id) }.to_set
+    orphans.each { |orphan| @results << remove_orphan(orphan) }
+    extra_metrics.reject { |m| covered.include?(m) }.each { |m| @results << remove_metrics_only(m) }
+    @results.each { |r| r.failed? ? @logger.error(r.to_s) : @logger.info(r.to_s) }
+    counts = @results.group_by(&:status).transform_values(&:length)
+    @logger.info("Done: #{counts.empty? ? 'nothing to remove' : counts.map { |k, v| "#{k}=#{v}" }.join(', ')}")
+    @results
+  end
+
+  def failures
+    @results.select(&:failed?)
+  end
+
+  private
+
+  def submission_graph
+    LinkedData::Models::OntologySubmission.uri_type
+  end
+
+  def metrics_graph
+    LinkedData::Models::Metric.uri_type
+  end
+
+  def metrics_id(submission_id)
+    "#{submission_id}/metrics"
+  end
+
+  def remove_orphan(orphan)
+    result = Result.new(id: orphan.id, kind: orphan.kind, effect: orphan.effect)
+    reason = healthy_now(orphan.id)
+    if reason
+      result.status = :skipped
+      result.message = reason
+      return result
+    end
+
+    sub_triples = triples_of(orphan.id, submission_graph)
+    metric_triples = triples_of(metrics_id(orphan.id), metrics_graph)
+    result.triples = sub_triples.length
+    result.metrics_triples = metric_triples.length
+    folder = orphan.folder if orphan.folder && Dir.exist?(orphan.folder)
+    result.folder = folder
+
+    write_backup(orphan.id, sub_triples, submission_graph)
+    write_backup(metrics_id(orphan.id), metric_triples, metrics_graph)
+    delete_triples(orphan.id, sub_triples, submission_graph)
+    delete_triples(metrics_id(orphan.id), metric_triples, metrics_graph)
+    result.moved_to = quarantine_folder(orphan, folder) if folder
+    result.status = :removed
+    result
+  rescue StandardError => e
+    result.status = :error
+    result.message = "#{e.class}: #{e.message}"
+    result
+  end
+
+  def remove_metrics_only(metrics_uri)
+    result = Result.new(id: metrics_uri, kind: :metrics, effect: :none)
+    triples = triples_of(metrics_uri, metrics_graph)
+    result.triples = triples.length
+    write_backup(metrics_uri, triples, metrics_graph)
+    delete_triples(metrics_uri, triples, metrics_graph)
+    result.status = :removed
+    result
+  rescue StandardError => e
+    result.status = :error
+    result.message = "#{e.class}: #{e.message}"
+    result
+  end
+
+  # nil while the subject is still an orphan; otherwise why it no longer is
+  def healthy_now(subject)
+    typed = Goo.sparql_query_client.query(
+      "SELECT ?t WHERE { GRAPH <#{submission_graph}> { <#{subject}> a ?t } }"
+    ).any? { |s| s[:t].to_s == submission_graph.to_s }
+    return nil unless typed
+
+    links = Goo.sparql_query_client.query(
+      "SELECT ?o WHERE { GRAPH <#{submission_graph}> { <#{subject}> <#{OrphanedSubmissionsReport.submission_uri(:ontology)}> ?o } }"
+    ).map { |s| s[:o].to_s }
+    ontology_type = LinkedData::Models::Ontology.uri_type
+    links.each do |ont|
+      exists = Goo.sparql_query_client.query(
+        "SELECT ?t WHERE { GRAPH <#{ontology_type}> { <#{ont}> a ?t } }"
+      ).any? { |s| s[:t].to_s == ontology_type.to_s }
+      return "now linked to #{ont}" if exists
+    end
+    nil
+  end
+
+  def triples_of(subject, graph)
+    Goo.sparql_query_client.query("SELECT ?p ?o WHERE { GRAPH <#{graph}> { <#{subject}> ?p ?o } }")
+                           .map { |s| [s[:p], s[:o]] }
+  end
+
+  def write_backup(subject, triples, graph)
+    return if triples.empty?
+
+    lines = triples.map { |p, o| "<#{subject}> #{p.to_ntriples} #{o.to_ntriples} <#{graph}> .\n" }
+    File.open(@backup, File::WRONLY | File::APPEND | File::CREAT, 0o600) do |f|
+      f.write(lines.join)
+      f.flush
+      f.fsync
+    end
+  end
+
+  # delete_data with a graph also invalidates Goo's query cache for that graph
+  def delete_triples(subject, triples, graph)
+    return if triples.empty?
+    raise "has blank-node values, which DELETE DATA can't match; left in place" if triples.any? { |_, o| o.node? }
+
+    data = RDF::Graph.new
+    triples.each { |p, o| data << [RDF::URI.new(subject), p, o] }
+    Goo.sparql_update_client.delete_data(data, graph: graph)
+    left = triples_of(subject, graph)
+    raise "#{left.length} triples still stored after the delete" unless left.empty?
+  end
+
+  def quarantine_folder(orphan, folder)
+    target = File.join(@quarantine, orphan.acronym, orphan.submission_id)
+    target = "#{target}-#{Time.now.utc.strftime('%Y%m%dT%H%M%SZ')}" if File.exist?(target)
+    FileUtils.mkdir_p(File.dirname(target))
+    FileUtils.mv(folder, target)
+    target
+  end
+end
+
 if $PROGRAM_NAME == __FILE__
   require 'csv'
 
@@ -273,20 +477,37 @@ if $PROGRAM_NAME == __FILE__
   require 'bundler/setup'
   require 'optparse'
 
-  options = { ontologies: nil, details: false, csv: nil, logfile: nil }
+  options = { ontologies: nil, details: false, csv: nil, logfile: nil,
+              remove: false, blocking_only: false, backup: nil, quarantine: nil }
   OptionParser.new do |opts|
     opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
-    opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only report orphans of these ontologies (default: all)') do |acronyms|
+    opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only orphans of these ontologies (default: all)') do |acronyms|
       options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
     end
     opts.on('-d', '--details', 'Also print every triple of each orphan') { options[:details] = true }
     opts.on('-c', '--csv FILE', 'Also write one row per orphan to FILE') { |file| options[:csv] = file }
     opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
+    opts.separator('')
+    opts.separator('Removing (changes the triplestore and the repository folder):')
+    opts.on('--remove', 'Remove the orphans listed above (needs --backup)') { options[:remove] = true }
+    opts.on('--backup FILE', 'Append the removed triples to FILE as N-Quads') { |file| options[:backup] = file }
+    opts.on('-b', '--blocking-only', 'Only remove orphans that block their ontology\'s next submission') do
+      options[:blocking_only] = true
+    end
+    opts.on('-q', '--quarantine DIR', 'Move orphan folders here (default: <repository>/.orphaned)') do |dir|
+      options[:quarantine] = dir
+    end
     opts.on('-h', '--help', 'Display this screen') do
       puts opts
       exit
     end
   end.parse!
+
+  if options[:remove]
+    abort('--remove needs --backup FILE') if options[:backup].to_s.empty?
+  elsif options[:backup] || options[:blocking_only] || options[:quarantine]
+    abort('--backup, --blocking-only and --quarantine only apply with --remove')
+  end
 
   require_relative '../lib/ncbo_cron'
   config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
@@ -333,6 +554,18 @@ if $PROGRAM_NAME == __FILE__
       end
     end
     logger.info("Wrote #{result.orphans.length} rows to #{options[:csv]}")
+  end
+
+  if options[:remove]
+    remover = OrphanedSubmissionRemover.new(logger: logger, backup: options[:backup], quarantine: options[:quarantine])
+    remover.remove_from(result, blocking_only: options[:blocking_only])
+    failures = remover.failures
+    unless failures.empty?
+      logger.error("#{failures.length} orphans need attention:\n  #{failures.join("\n  ")}")
+      exit 1
+    end
+    logger.info("Rerun #{File.basename(__FILE__)} without --remove to check what's left")
+    exit 0
   end
 
   blocking = result.by_effect(:blocks_next_submission)
