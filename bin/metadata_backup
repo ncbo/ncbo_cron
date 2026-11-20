@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+#
+# Exports the triplestore metadata graphs (Ontology, OntologySubmission, User,
+# Note, Project, RestBackupMapping, ...) to a gzipped N-Quads file plus a JSON
+# manifest with per-graph triple counts. Works with every Goo backend
+# (4store, AllegroGraph, GraphDB, Virtuoso) through the SPARQL endpoint in
+# config/config.rb, and can run while the store is live.
+#
+# Exits non-zero when any graph's export does not match the endpoint's count,
+# so a cron job surfaces a bad backup.
+#
+#   bin/metadata_backup -o /srv/ontoportal/data/backup/triplestore/metadata
+#   bin/metadata_backup -o /tmp --list-graphs
+#
+# Restore with bin/metadata_restore.
+
+Signal.trap('INT') { exit 1 }
+
+require 'bundler/setup'
+require 'optparse'
+
+options = { extra_graphs: [], audit: false }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} -o DIR [options]"
+  opts.on('-o', '--output-dir DIR', 'Directory to write metadata-<timestamp>.nq.gz and .manifest.json') { |v| options[:output_dir] = v }
+  opts.on('-g', '--graph URI', 'Also export this graph (repeatable)') { |v| options[:extra_graphs] << v }
+  opts.on('-f', '--graphs-file FILE', 'Export only the graphs listed in FILE, one per line, instead of the model graphs') do |v|
+    options[:graphs] = File.readlines(v, chomp: true).map(&:strip).reject { |l| l.empty? || l.start_with?('#') }
+  end
+  opts.on('--audit', 'Also list every graph in the store and report any that are neither metadata nor submission graphs') { options[:audit] = true }
+  opts.on('--list-graphs', 'Print the metadata graphs that would be exported and exit') { options[:list] = true }
+  opts.on('-l', '--logfile FILE', 'Log to FILE (default: stdout)') { |v| options[:logfile] = v }
+  opts.on('-h', '--help', 'Show this help') { puts opts; exit }
+end.parse!
+
+require_relative '../lib/ncbo_cron'
+config_file = File.expand_path('../config/config.rb', __dir__)
+abort('Please create a config/config.rb file using config/config.rb.sample as a template') unless File.exist?(config_file)
+require_relative '../config/config'
+require_relative '../lib/ncbo_cron/metadata_backup'
+
+if options[:list]
+  puts(options[:graphs] || NcboCron::MetadataBackup.model_graphs)
+  exit
+end
+abort('--output-dir is required (see --help)') unless options[:output_dir]
+
+logger = Logger.new(options[:logfile] || $stdout)
+result = NcboCron::MetadataBackup::Exporter.new(
+  output_dir: options[:output_dir],
+  graphs: options[:graphs],
+  extra_graphs: options[:extra_graphs],
+  audit: options[:audit],
+  logger: logger
+).run
+
+puts result.file
+exit(result.errors.empty? ? 0 : 1) # warnings alone do not fail the run

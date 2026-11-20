@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+#
+# Loads a metadata dump written by bin/metadata_backup into the
+# triplestore configured in config/config.rb, through SPARQL UPDATE, so it
+# works the same on 4store, AllegroGraph, GraphDB and Virtuoso.
+#
+# By default it refuses to write into graphs that already hold data; pass
+# --replace to drop and reload them. After a restore, clear the Goo/HTTP
+# caches (bundle exec rake cache:clear) and reprocess ontologies to rebuild
+# the submission graphs.
+#
+#   bin/metadata_restore -i metadata-20261120T030000Z.nq.gz --dry-run
+#   bin/metadata_restore -i metadata-20261120T030000Z.nq.gz --replace --yes
+
+Signal.trap('INT') { exit 1 }
+
+require 'bundler/setup'
+require 'optparse'
+
+options = { replace: false, dry_run: false, yes: false, batch_size: 1000 }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} -i FILE [options]"
+  opts.on('-i', '--input FILE', 'metadata-*.nq.gz (or .nq) to load') { |v| options[:file] = v }
+  opts.on('-g', '--graph URI', 'Restore only this graph (repeatable)') { |v| (options[:graphs] ||= []) << v }
+  opts.on('--replace', 'Drop each target graph before loading it') { options[:replace] = true }
+  opts.on('--dry-run', 'Parse the dump and report counts without writing') { options[:dry_run] = true }
+  opts.on('--batch-size N', Integer, 'Triples per INSERT DATA request (default 1000)') { |v| options[:batch_size] = v }
+  opts.on('-y', '--yes', 'Do not ask for confirmation') { options[:yes] = true }
+  opts.on('-l', '--logfile FILE', 'Log to FILE (default: stdout)') { |v| options[:logfile] = v }
+  opts.on('-h', '--help', 'Show this help') { puts opts; exit }
+end.parse!
+
+abort('--input is required (see --help)') unless options[:file]
+abort("#{options[:file]} not found") unless File.exist?(options[:file])
+
+require_relative '../lib/ncbo_cron'
+config_file = File.expand_path('../config/config.rb', __dir__)
+abort('Please create a config/config.rb file using config/config.rb.sample as a template') unless File.exist?(config_file)
+require_relative '../config/config'
+require_relative '../lib/ncbo_cron/metadata_backup'
+
+unless options[:dry_run] || options[:yes]
+  target = "#{Goo.sparql_backend_name} at #{Goo.sparql_update_client.url}"
+  action = options[:replace] ? 'DROP and reload' : 'load'
+  abort('Refusing to write without a terminal; pass --yes') unless $stdin.tty?
+  print "This will #{action} metadata graphs in #{target}. Continue? [y/N] "
+  abort('Cancelled') unless $stdin.gets.to_s.strip.casecmp?('y')
+end
+
+logger = Logger.new(options[:logfile] || $stdout)
+result = NcboCron::MetadataBackup::Restorer.new(
+  file: options[:file],
+  graphs: options[:graphs],
+  replace: options[:replace],
+  dry_run: options[:dry_run],
+  batch_size: options[:batch_size],
+  logger: logger
+).run
+
+exit(result.errors.empty? ? 0 : 1)
