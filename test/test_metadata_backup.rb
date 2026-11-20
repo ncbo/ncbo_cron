@@ -134,6 +134,8 @@ class TestMetadataBackup < TestCase
   def dump_graph(graph)
     io = StringIO.new
     MB::Sparql.new.construct_graph(graph, io)
-    io.string.force_encoding(Encoding::UTF_8).lines.map(&:strip).reject(&:empty?).sort
+    # Virtuoso answers an empty CONSTRUCT with a "# Empty NT" comment line
+    io.string.force_encoding(Encoding::UTF_8).lines.map(&:strip)
+      .reject { |l| l.empty? || l.start_with?('#') }.sort
   end
 end
