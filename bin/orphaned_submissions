@@ -26,7 +26,8 @@
 #   1. reads its triples again and skips it if they now make it a typed submission linked to an
 #      existing ontology, or if they're gone
 #   2. appends a comment line saying what is being removed, then every triple of it and of its
-#      Metrics record, to the --backup N-Quads file, before anything is changed
+#      Metrics record, to the --backup N-Quads file, before anything is changed, and writes the
+#      same lines to the log (with API keys masked), so the log shows every quad deleted
 #   3. moves its folder <repository>/<ACRONYM>/<id>, if there is one, to the quarantine folder
 #      (default <repository>/.orphaned). Only the folder named by the orphan's own numeric id is
 #      moved, never the folder its uploadFilePath points at.
@@ -445,7 +446,9 @@ class OrphanedSubmissionRemover
     result.metrics_triples = metric_triples.length
     result.folder = folder
 
-    write_backup(orphan, sub_triples, metric_triples, folder, target)
+    note, quads = removal_record(orphan, sub_triples, metric_triples, folder, target)
+    write_backup(note, quads)
+    log_removal(note, quads)
     moved_to = move_folder(folder, target) if folder
     result.moved_to = moved_to
     # Metrics first: if the submission delete then fails, the orphan is still there to be found
@@ -490,23 +493,33 @@ class OrphanedSubmissionRemover
     File.open(@backup, File::WRONLY | File::APPEND | File::CREAT, 0o600, &block)
   end
 
-  # A comment line saying what is removed and where its folder goes, then its triples
-  def write_backup(orphan, sub_triples, metric_triples, folder, target)
-    note = "# #{Time.now.utc.iso8601} removing #{orphan.id} (#{orphan.kind}, #{orphan.effect}): " \
+  # What is removed and where its folder goes, and every quad that gets deleted
+  def removal_record(orphan, sub_triples, metric_triples, folder, target)
+    note = "removing #{orphan.id} (#{orphan.kind}, #{orphan.effect}): " \
            "#{sub_triples.length} submission triples, #{metric_triples.length} metrics triples"
     note += ", folder #{folder} -> #{target}" if folder
-    lines = [note.delete("\r\n") + "\n"]
-    lines.concat(quads(orphan.id, sub_triples, submission_graph))
-    lines.concat(quads(metrics_id(orphan.id), metric_triples, metrics_graph))
+    quads = quads(orphan.id, sub_triples, submission_graph) +
+            quads(metrics_id(orphan.id), metric_triples, metrics_graph)
+    [note.delete("\r\n"), quads]
+  end
+
+  # The note as a comment line, then the quads, exactly as stored
+  def write_backup(note, quads)
     open_backup do |f|
-      f.write(lines.join)
+      f.write("# #{Time.now.utc.iso8601} #{note}\n#{quads.map { |q| "#{q}\n" }.join}")
       f.flush
       f.fsync
     end
   end
 
+  # The same record in the log, with API keys masked
+  def log_removal(note, quads)
+    @logger.info(OrphanedSubmissionsReport.mask(note.sub(/\Aremoving/, 'Removing')))
+    quads.each { |q| @logger.info("  #{OrphanedSubmissionsReport.mask(q)}") }
+  end
+
   def quads(subject, triples, graph)
-    triples.map { |p, o| "<#{subject}> #{p.to_ntriples} #{o.to_ntriples} <#{graph}> .\n" }
+    triples.map { |p, o| "<#{subject}> #{p.to_ntriples} #{o.to_ntriples} <#{graph}> ." }
   end
 
   # delete_data with a graph also invalidates Goo's query cache for that graph

@@ -326,6 +326,22 @@ class TestOrphanedSubmissionRemover < TestCase
     assert_equal [sub_uri(5).to_s, GONE].sort, report.run.orphans.map(&:id).sort
   end
 
+  def test_the_log_lists_every_deleted_quad_with_api_keys_masked
+    insert(sub_uri(5), LEGACY_HOMEPAGE, RDF::Literal.new('http://x.example.org/dl?apikey=8b5b-secret'))
+    log = StringIO.new
+    r = OrphanedSubmissionRemover.new(logger: Logger.new(log), backup: @backup, quarantine: @quarantine,
+                                      repository_folder: repository)
+
+    r.run
+
+    backup_quads = File.readlines(@backup, chomp: true).reject { |l| l.start_with?('#') }
+    logged = log.string
+    backup_quads.each { |q| assert_includes logged, OrphanedSubmissionsReport.mask(q) }
+    assert_includes logged, "Removing #{sub_uri(3)} (unlinked, blocks_next_submission)"
+    refute_includes logged, '8b5b-secret'
+    assert_includes File.read(@backup), '8b5b-secret', 'the backup keeps the value as stored'
+  end
+
   def test_only_named_ontologies_are_removed
     results = remover.run(acronyms: ['gone'])
 
