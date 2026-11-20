@@ -63,6 +63,23 @@ class TestSubmissionCompressor < TestCase
     assert_equal [:compressed] * 3, results.map(&:status)
   end
 
+  # The pull compares the latest submission's file with the remote one byte for byte
+  def test_include_unarchived_leaves_pulled_submissions_that_are_not_archived_alone
+    submissions('GZIPME-0').each do |sub|
+      sub.bring_remaining
+      sub.pullLocation = RDF::URI.new('http://example.org/GZIPME.ttl')
+      sub.save
+    end
+    latest = paths('GZIPME-0').last
+
+    results = compressor(group: 'UMLS', include_unarchived: true).run
+
+    assert_equal [:compressed, :compressed, :pulled], results.map(&:status), results.join("\n")
+    assert_equal latest, paths('GZIPME-0').last
+    assert File.exist?(latest)
+    refute File.exist?("#{latest}.gz")
+  end
+
   def test_without_filters_every_ontology_is_compressed
     results = compressor.run
     assert_equal [['GZIPME-0', 1], ['GZIPME-0', 2], ['OWLKEEP-0', 1]],

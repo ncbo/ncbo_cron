@@ -9,9 +9,12 @@
 # archived before it did that, files under its threshold, and UMLS submissions created
 # before bin/create_umls_submissions.rb started writing them gzipped.
 #
-# Only archived submissions are compressed unless --include-unarchived is given. Their
-# triples are already deleted and nothing reprocesses them; the latest submission is the
-# one the diff of the next submission reads, and the one most people download.
+# Only archived submissions are compressed unless --include-unarchived is given; their
+# triples are already deleted. The latest submission is the one most people download,
+# and the one the diff of the next submission reads, which fails on a compressed file.
+# Even with --include-unarchived, a submission that is not archived and has a
+# pullLocation is left alone: the pull compares the latest submission's file with the
+# remote one byte for byte, so a compressed file would look changed on every pull.
 #
 # Each archive is checked to decompress to the original bytes before the submission is
 # repointed, and the original is deleted only after the new path is read back from the
@@ -53,7 +56,8 @@ class SubmissionCompressor
   # group:  only ontologies in this group (acronym), e.g. UMLS
   # format: only submissions in this ontology format (acronym), e.g. OWL
   # min_size: leave files smaller than this many bytes alone
-  # include_unarchived: also compress submissions that are not archived, the latest included
+  # include_unarchived: also compress submissions that are not archived, the latest included,
+  #                     except those with a pullLocation
   # archive_type: 'gz' (gzip) or 'zip' (what the archiver writes)
   def initialize(logger: Logger.new($stdout), dry_run: false, keep_original: false, redis: nil,
                  group: nil, format: nil, min_size: 0, include_unarchived: false, archive_type: 'gz')
@@ -94,6 +98,7 @@ class SubmissionCompressor
     return result(sub, :no_file, 'no uploadFilePath') if path.nil? || path.empty?
     return missing(sub, path) unless File.file?(path)
     return result(sub, :already_compressed, File.basename(path)) if sub.zipped?(path)
+    return result(sub, :pulled, 'not archived and has a pullLocation') if pulled_and_unarchived?(sub)
     return result(sub, :outside_folder, "#{path} is not in #{sub.data_folder}") unless own_file?(sub, path)
 
     size_before = File.size(path)
@@ -192,7 +197,7 @@ class SubmissionCompressor
   def select_submissions(acronyms)
     model = LinkedData::Models::OntologySubmission
     query = @format ? model.where(hasOntologyLanguage: ontology_format) : model.where
-    subs = query.include(:submissionId, :uploadFilePath, :masterFileName, submissionStatus: [:code],
+    subs = query.include(:submissionId, :uploadFilePath, :masterFileName, :pullLocation, submissionStatus: [:code],
                          ontology: [:acronym])
                 .all
     subs = without_broken(subs)
@@ -273,6 +278,13 @@ class SubmissionCompressor
     result(sub, :missing, message)
   end
 
+  # OntologyHelper.new_file_exists? hashes the latest submission's uploadFilePath and
+  # compares it with the downloaded remote file
+  def pulled_and_unarchived?(sub)
+    sub.bring(:pullLocation) if sub.bring?(:pullLocation)
+    !sub.pullLocation.nil? && !sub.archived?
+  end
+
   def queued?(sub)
     redis.hexists(NcboCron::Helpers::OntologyHelper::PROCESS_QUEUE_HOLDER,
                   NcboCron::Helpers::OntologyHelper.get_prefixed_id(sub.id))
@@ -313,7 +325,8 @@ if $PROGRAM_NAME == __FILE__
     opts.on('-s', '--min-size SIZE', 'Leave files smaller than SIZE alone, e.g. 100MB (default: 0)') do |size|
       options[:min_size] = SubmissionCompressor.parse_size(size)
     end
-    opts.on('-u', '--include-unarchived', 'Also compress submissions that are not archived, the latest included') do
+    opts.on('-u', '--include-unarchived', 'Also compress submissions that are not archived, the latest included, ' \
+                                                'unless they have a pullLocation') do
       options[:include_unarchived] = true
     end
     opts.on('-d', '--dryrun', 'List what would be compressed; change nothing') { options[:dry_run] = true }
