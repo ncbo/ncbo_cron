@@ -16,11 +16,11 @@
 # Without --remove nothing is changed, so a plain run is safe on any environment and shows
 # exactly what --remove would remove. API keys in stored values are masked in the output.
 #
-#   bin/ncbo_orphaned_submissions
-#   bin/ncbo_orphaned_submissions -o CDAO,EMAPA --details
-#   bin/ncbo_orphaned_submissions --csv orphans.csv
-#   bin/ncbo_orphaned_submissions --remove --blocking-only --backup orphans-blocking.nq
-#   bin/ncbo_orphaned_submissions --remove --backup orphans-all.nq
+#   bin/orphaned_submissions
+#   bin/orphaned_submissions -o CDAO,EMAPA --details
+#   bin/orphaned_submissions --csv orphans.csv
+#   bin/orphaned_submissions --remove --blocking-only --backup orphans-blocking.nq
+#   bin/orphaned_submissions --remove --backup orphans-all.nq
 #
 # --remove, for each orphan (see OrphanedSubmissionRemover below):
 #   1. reads its triples again and skips it if they now make it a typed submission linked to an

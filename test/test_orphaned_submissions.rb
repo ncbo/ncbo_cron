@@ -2,7 +2,7 @@ require_relative 'test_case'
 require 'open3'
 
 # The report is a standalone script; load it without running its command line
-load File.expand_path('../bin/ncbo_orphaned_submissions', __dir__)
+load File.expand_path('../bin/orphaned_submissions', __dir__)
 
 class TestOrphanedSubmissionsReport < TestCase
   Report = OrphanedSubmissionsReport
@@ -401,7 +401,7 @@ class TestOrphanedSubmissionRemover < TestCase
 
   # The option checks run before config is loaded, so this never touches a triplestore
   def run_script(*args)
-    script = File.expand_path('../bin/ncbo_orphaned_submissions', __dir__)
+    script = File.expand_path('../bin/orphaned_submissions', __dir__)
     out, status = Open3.capture2e(RbConfig.ruby, script, *args)
     [out, status]
   end
