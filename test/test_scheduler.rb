@@ -171,6 +171,7 @@ class TestScheduler < TestCase
         sleep(0.25)
       end
       refute_nil initial_expire, 'job never acquired the lock'
+      assert_equal NcboCron::Scheduler.lock_owner(job_name), redis.get("lock:owner:#{job_name}")
 
       # Run well past the original lock life
       sleep(lock_life * 2)
