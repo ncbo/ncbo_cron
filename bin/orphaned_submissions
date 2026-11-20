@@ -1,0 +1,680 @@
+#!/usr/bin/env ruby
+
+# Finds OntologySubmission resources that have lost their link to an ontology and, with
+# --remove, removes them:
+#   - typed submissions with no `ontology` triple, or one pointing at a missing ontology
+#   - triples left in the submission graph with no rdf:type
+# A typed orphan holding an ontology's next submission id makes every new submission of that
+# ontology (pulled or uploaded) fail as a duplicate. See OrphanedSubmissionsReport below for
+# the kinds and effects reported.
+#
+# Scope: only subjects of the submission graph named like a submission
+# (<ontology>/submissions/<id>), plus each orphan's own Metrics record. Other subjects in the
+# submission graph, Metrics records whose submission is already gone, submission data graphs
+# and other leftovers are reported or left alone; they belong to a broader orphan cleanup.
+#
+# Without --remove nothing is changed, so a plain run is safe on any environment and shows
+# exactly what --remove would remove. API keys in stored values are masked in the output.
+#
+#   bin/orphaned_submissions
+#   bin/orphaned_submissions -o CDAO,EMAPA --details
+#   bin/orphaned_submissions --csv orphans.csv
+#   bin/orphaned_submissions --remove --blocking-only --backup orphans-blocking.nq
+#   bin/orphaned_submissions --remove --backup orphans-all.nq
+#
+# --remove, for each orphan (see OrphanedSubmissionRemover below):
+#   1. reads its triples again and skips it if they now make it a typed submission linked to an
+#      existing ontology, or if they're gone
+#   2. appends a comment line saying what is being removed, then every triple of it and of its
+#      Metrics record, to the --backup N-Quads file, before anything is changed, and writes the
+#      same lines to the log (with API keys masked), so the log shows every quad deleted
+#   3. moves its folder <repository>/<ACRONYM>/<id>, if there is one, to the quarantine folder
+#      (default <repository>/.orphaned). Only the folder named by the orphan's own numeric id is
+#      moved, never the folder its uploadFilePath points at.
+#   4. deletes the Metrics triples, then the submission triples, and checks they're gone (this
+#      also clears Goo's query cache for the graph). If a delete fails the folder is moved back,
+#      and whatever is left is found again by the next run.
+# Each result is logged as it happens. Every run, with or without --remove, logs to stdout and
+# to --logfile, which defaults to orphaned-submissions-<report|remove>-<YYYYMMDD-HHMMSS>.log in
+# the ncbo_cron log directory (the directory of NcboCron.settings.log_path). Healthy
+# submissions and ontologies are never touched. Run
+# --remove when the ontology pull isn't running: the pull writes into the folder of the id a
+# blocking orphan holds. Ctrl-C during --remove stops after the current orphan; press it again
+# to quit at once.
+#
+# The backup holds the triples as stored, unmasked, so it can be restored exactly; it is
+# created with mode 0600. Its `#` lines are standard N-Quads comments. To restore on
+# AllegroGraph:
+#   curl -X POST -H 'Content-Type: text/x-nquads' --data-binary @BACKUP.nq \
+#        http://<host>:10035/repositories/<repo>/statements
+# and move the folders back out of the quarantine folder (the comment lines say which).
+#
+# --blocking-only removes just the orphans that break an ontology's next submission: typed ones
+# holding the next id (blocks_next_submission) and untyped ones holding it
+# (merges_into_next_submission).
+#
+# Exit codes: without --remove, 1 when an orphan blocks or would merge into an ontology's next
+# submission;
+# with --remove, 1 when an orphan couldn't be removed or the run was interrupted. Otherwise 0.
+#
+# Everything is in this file; tests load it without running the command line.
+
+require 'fileutils'
+require 'logger'
+require 'set'
+require 'time'
+
+# Read-only report of OntologySubmission resources that have lost their link to an ontology.
+#
+# Goo can't find these by walking ontologies: an ontology's submissions are the resources whose
+# `ontology` triple points at it, and Goo only loads resources that have an rdf:type. So this
+# reads the submission graph directly and works out three kinds of orphan:
+#
+#   :unlinked  typed submission with no `ontology` triple (Goo loads it with ontology = nil)
+#   :dangling  `ontology` triple pointing only at Ontology resources that don't exist
+#   :untyped   triples left in the submission graph with no submission rdf:type (left behind
+#              by a delete)
+#
+# Only subjects named <ontology>/submissions/<id> are considered. Each orphan belongs to the
+# ontology its URI names, whatever its `ontology` triple says, because that is whose next
+# submission URI it can collide with. Its effect is judged against the highest submissionId
+# still linked to that ontology, which is what Ontology#next_submission_id counts:
+#
+#   :blocks_next_submission  typed, and holds the next id: Goo rejects every new submission
+#                            (pull or upload) as a duplicate
+#   :merges_into_next_submission  untyped, and holds the next id: its triples will be added to
+#                            the ontology's next submission (pull or upload)
+#   :blocks_later            typed, above the next id: blocks once the ontology gets there
+#   :merges_later            untyped, above the next id: merges once the ontology gets there
+#   :ontology_deleted        the ontology its URI names no longer exists
+#   :none                    below the highest id, or not a numeric id, so no new submission
+#                            will reuse it
+#
+# NEXT_SUBMISSION_EFFECTS are the ones that break the ontology's next submission.
+# Nothing is written to the triplestore or the repository folder.
+class OrphanedSubmissionsReport
+  KINDS = %i[unlinked dangling untyped].freeze
+  NEXT_SUBMISSION_EFFECTS = %i[blocks_next_submission merges_into_next_submission].freeze
+  PAGE_SIZE = 10_000
+  SUBMISSION_PATH = %r{\A(.+/ontologies/([^/]+))/submissions/([^/]+)\z}.freeze
+  # What a repository folder name may look like; anything else never gets a folder
+  ACRONYM = /\A[A-Za-z0-9][A-Za-z0-9_-]*\z/.freeze
+  NUMERIC_ID = /\A\d+\z/.freeze
+
+  Orphan = Struct.new(:id, :acronym, :submission_id, :kind, :effect, :ontology_id, :ontology_exists,
+                      :linked_to, :highest_linked_id, :triples, :upload_file_paths, :folder,
+                      :folder_exists, keyword_init: true) do
+    def upload_files
+      upload_file_paths.map { |path| [path, File.exist?(path)] }
+    end
+
+    def statuses
+      objects_of(OrphanedSubmissionsReport.submission_uri(:submissionStatus)).map { |s| s.to_s.split('/').last }
+    end
+
+    def creation_date
+      objects_of(OrphanedSubmissionsReport.submission_uri(:creationDate)).first&.to_s
+    end
+
+    def objects_of(predicate)
+      triples.select { |p, _| p == predicate }.map(&:last)
+    end
+
+    def to_s
+      files = upload_files.map { |path, exists| "#{path} (#{exists ? 'exists' : 'missing'})" }
+      [
+        "#{acronym}/#{submission_id}",
+        kind,
+        effect,
+        "ontology #{ontology_exists ? 'exists' : 'missing'}",
+        ("linked to #{linked_to.join('|')}" unless linked_to.empty?),
+        "highest linked id #{highest_linked_id || '-'}",
+        "#{triples.length} triples",
+        "status #{statuses.empty? ? '-' : statuses.join('|')}",
+        "created #{creation_date || '-'}",
+        "folder #{folder_exists ? 'exists' : 'missing'}",
+        "uploadFilePath #{files.empty? ? '-' : files.join(', ')}"
+      ].compact.join('  ')
+    end
+  end
+
+  # other_subjects: subjects that would count as orphans but aren't named like a submission;
+  # they are reported and never removed
+  Result = Struct.new(:subject_count, :typed_count, :linked_count, :orphans, :other_subjects,
+                      keyword_init: true) do
+    def by_kind(kind)
+      orphans.select { |o| o.kind == kind }
+    end
+
+    def by_effect(effect)
+      orphans.select { |o| o.effect == effect }
+    end
+  end
+
+  def self.submission_uri(attr)
+    LinkedData::Models::OntologySubmission.attribute_uri(attr)
+  end
+
+  def self.mask(text)
+    text.to_s.gsub(/(apikey=)[^&\s"']+/i, '\1***')
+  end
+
+  def initialize(logger: Logger.new($stdout), repository_folder: LinkedData.settings.repository_folder,
+                 page_size: PAGE_SIZE)
+    @logger = logger
+    @repository_folder = repository_folder.to_s
+    @page_size = page_size
+  end
+
+  # acronyms: only report orphans of these ontologies (the whole graph is still scanned)
+  def run(acronyms: nil)
+    wanted = acronyms&.map(&:upcase)&.to_set
+    submission_graph = LinkedData::Models::OntologySubmission.uri_type
+
+    subjects = select_column(submission_graph, '?s ?p ?o', :s, distinct: true)
+    typed = select_column(submission_graph, "?s a <#{submission_graph}>", :s, distinct: true)
+    links = select_pairs(submission_graph, "?s <#{self.class.submission_uri(:ontology)}> ?o", :s, :o)
+    ids = select_pairs(submission_graph, "?s <#{self.class.submission_uri(:submissionId)}> ?o", :s, :o)
+    ontologies = select_column(LinkedData::Models::Ontology.uri_type,
+                               "?s a <#{LinkedData::Models::Ontology.uri_type}>", :s, distinct: true)
+    @logger.info("Submission graph: #{subjects.size} subjects, #{typed.size} typed, #{links.size} with an ontology link")
+
+    highest = highest_linked_ids(typed, links, ids, ontologies)
+    orphans = []
+    other = []
+    subjects.each do |subject|
+      kind = classify(subject, typed, links, ontologies)
+      next unless kind
+
+      unless SUBMISSION_PATH.match?(subject)
+        other << subject
+        next
+      end
+
+      orphan = build_orphan(subject, kind, links, ontologies, highest)
+      next if wanted && !wanted.include?(orphan.acronym.upcase)
+
+      orphans << orphan
+    end
+    orphans.sort_by! { |o| [o.acronym, o.submission_id.to_i, o.id] }
+    unless other.empty?
+      @logger.info("#{other.length} subjects look orphaned but aren't named like a submission; left alone")
+    end
+
+    Result.new(subject_count: subjects.size, typed_count: typed.size, linked_count: links.size,
+               orphans: orphans, other_subjects: other.sort)
+  end
+
+  private
+
+  def classify(subject, typed, links, ontologies)
+    return :untyped unless typed.include?(subject)
+
+    targets = links[subject]
+    return :unlinked if targets.nil? || targets.empty?
+    return :dangling unless targets.any? { |o| ontologies.include?(o) }
+
+    nil
+  end
+
+  def build_orphan(subject, kind, links, ontologies, highest)
+    ontology_id, acronym, submission_id = SUBMISSION_PATH.match(subject).captures
+    ontology_exists = ontologies.include?(ontology_id)
+    highest_id = highest[ontology_id]
+    triples = subject_triples(subject)
+    upload_paths = triples.select { |p, _| p == self.class.submission_uri(:uploadFilePath) }.map { |_, o| o.to_s }
+    folder = folder_for(acronym, submission_id)
+
+    Orphan.new(id: subject, acronym: acronym, submission_id: submission_id, kind: kind,
+               effect: effect(kind, submission_id, ontology_exists, highest_id),
+               ontology_id: ontology_id, ontology_exists: ontology_exists,
+               linked_to: (links[subject] || []).map(&:to_s), highest_linked_id: highest_id,
+               triples: triples, upload_file_paths: upload_paths,
+               folder: folder, folder_exists: folder ? Dir.exist?(folder) : false)
+  end
+
+  def folder_for(acronym, submission_id)
+    return nil unless ACRONYM.match?(acronym) && NUMERIC_ID.match?(submission_id)
+
+    File.join(@repository_folder, acronym, submission_id)
+  end
+
+  def effect(kind, submission_id, ontology_exists, highest_id)
+    return :ontology_deleted unless ontology_exists
+    return :none unless NUMERIC_ID.match?(submission_id)
+
+    next_id = (highest_id || 0) + 1
+    id = submission_id.to_i
+    return :none if id < next_id
+    if kind == :untyped
+      id == next_id ? :merges_into_next_submission : :merges_later
+    else
+      id == next_id ? :blocks_next_submission : :blocks_later
+    end
+  end
+
+  # Same rule as Ontology#next_submission_id: only typed submissions linked to the ontology count
+  def highest_linked_ids(typed, links, ids, ontologies)
+    highest = {}
+    links.each do |subject, targets|
+      next unless typed.include?(subject)
+
+      id = ids[subject]&.map { |v| Integer(v.to_s, exception: false) }&.compact&.max
+      next unless id
+
+      targets.each do |ont|
+        next unless ontologies.include?(ont)
+
+        highest[ont] = id if highest[ont].nil? || id > highest[ont]
+      end
+    end
+    highest
+  end
+
+  def subject_triples(subject)
+    graph = LinkedData::Models::OntologySubmission.uri_type
+    query = "SELECT ?p ?o WHERE { GRAPH <#{graph}> { <#{subject}> ?p ?o } }"
+    Goo.sparql_query_client.query(query).map { |s| [s[:p], s[:o]] }
+                                 .sort_by { |p, o| [p.to_s, o.to_s] }
+  end
+
+  # Distinct IRI values of one variable, as a Set of strings
+  def select_column(graph, pattern, var, distinct: false)
+    values = Set.new
+    page(graph, pattern, [var], distinct) do |solution|
+      value = solution[var]
+      values << value.to_s if value.is_a?(RDF::URI)
+    end
+    values
+  end
+
+  # subject string => array of object values (IRIs as strings, literals as-is)
+  def select_pairs(graph, pattern, subject_var, object_var)
+    pairs = Hash.new { |h, k| h[k] = [] }
+    page(graph, pattern, [subject_var, object_var], false) do |solution|
+      subject = solution[subject_var]
+      next unless subject.is_a?(RDF::URI)
+
+      object = solution[object_var]
+      pairs[subject.to_s] << (object.is_a?(RDF::URI) ? object.to_s : object)
+    end
+    pairs.default_proc = nil
+    pairs
+  end
+
+  def page(graph, pattern, vars, distinct)
+    projection = vars.map { |v| "?#{v}" }.join(' ')
+    offset = 0
+    loop do
+      query = "SELECT #{'DISTINCT ' if distinct}#{projection} WHERE { GRAPH <#{graph}> { #{pattern} } } " \
+              "ORDER BY #{projection} LIMIT #{@page_size} OFFSET #{offset}"
+      count = 0
+      Goo.sparql_query_client.query(query).each_solution do |solution|
+        count += 1
+        yield solution
+      end
+      break if count < @page_size
+
+      offset += @page_size
+    end
+  end
+end
+
+# Removes the orphans an OrphanedSubmissionsReport found: backs up their triples, moves their
+# folders to a quarantine folder, and deletes the triples. Each orphan is checked again from
+# the triples about to be deleted, since the report may be minutes old.
+class OrphanedSubmissionRemover
+  Result = Struct.new(:id, :kind, :effect, :status, :triples, :metrics_triples, :folder, :moved_to, :message,
+                      keyword_init: true) do
+    def failed?
+      status == :error
+    end
+
+    def to_s
+      line = "#{id}: #{status} (#{kind}, #{effect}, #{triples.to_i} triples"
+      line += ", #{metrics_triples} metrics triples" if metrics_triples.to_i.positive?
+      line += ')'
+      line += " folder #{folder} -> #{moved_to}" if moved_to
+      line += " #{message}" if message
+      OrphanedSubmissionsReport.mask(line)
+    end
+  end
+
+  attr_reader :results
+
+  def initialize(backup:, logger: Logger.new($stdout), quarantine: nil,
+                 repository_folder: LinkedData.settings.repository_folder, report: nil)
+    raise ArgumentError, 'a backup file is required' if backup.nil? || backup.to_s.empty?
+
+    @logger = logger
+    @backup = backup.to_s
+    @repository_folder = repository_folder.to_s
+    @quarantine = (quarantine || File.join(@repository_folder, '.orphaned')).to_s
+    @report = report || OrphanedSubmissionsReport.new(logger: logger, repository_folder: @repository_folder)
+    @results = []
+    @stop_requested = false
+    @interrupted = false
+  end
+
+  # Ask a running remove to stop after the current orphan; safe to call from a signal handler
+  def request_stop
+    @stop_requested = true
+  end
+
+  def stop_requested?
+    @stop_requested
+  end
+
+  # true when the last remove stopped before reaching every orphan
+  def interrupted?
+    @interrupted
+  end
+
+  # blocking_only: only orphans that block, or would merge into, their ontology's next submission
+  def run(acronyms: nil, blocking_only: false)
+    remove_from(@report.run(acronyms: acronyms), blocking_only: blocking_only)
+  end
+
+  def remove_from(report_result, blocking_only: false)
+    orphans = report_result.orphans
+    if blocking_only
+      orphans = orphans.select { |o| OrphanedSubmissionsReport::NEXT_SUBMISSION_EFFECTS.include?(o.effect) }
+    end
+    remove(orphans)
+  end
+
+  def remove(orphans)
+    @results = []
+    @interrupted = false
+    open_backup {} # fail before changing anything if the backup can't be written
+    @logger.info("Removing #{orphans.length} orphaned submissions; backup #{File.expand_path(@backup)}, " \
+                 "quarantine #{File.expand_path(@quarantine)}")
+    orphans.each_with_index do |orphan, i|
+      if @stop_requested
+        @interrupted = true
+        @logger.warn("Interrupted: #{orphans.length - i} orphans not processed")
+        break
+      end
+
+      result = remove_orphan(orphan)
+      @results << result
+      result.failed? ? @logger.error(result.to_s) : @logger.info(result.to_s)
+    end
+    counts = @results.group_by(&:status).transform_values(&:length)
+    @logger.info("Done: #{counts.empty? ? 'nothing removed' : counts.map { |k, v| "#{k}=#{v}" }.join(', ')}")
+    @results
+  end
+
+  def failures
+    @results.select(&:failed?)
+  end
+
+  private
+
+  def submission_graph
+    LinkedData::Models::OntologySubmission.uri_type
+  end
+
+  def metrics_graph
+    LinkedData::Models::Metric.uri_type
+  end
+
+  def metrics_id(submission_id)
+    "#{submission_id}/metrics"
+  end
+
+  def remove_orphan(orphan)
+    result = Result.new(id: orphan.id, kind: orphan.kind, effect: orphan.effect)
+    moved_to = nil
+
+    sub_triples = triples_of(orphan.id, submission_graph)
+    reason = sub_triples.empty? ? 'no triples left' : still_linked(sub_triples)
+    if reason
+      result.status = :skipped
+      result.message = reason
+      return result
+    end
+
+    metric_triples = triples_of(metrics_id(orphan.id), metrics_graph)
+    if (sub_triples + metric_triples).any? { |_, o| o.node? }
+      raise "has blank-node values, which DELETE DATA can't match; nothing removed"
+    end
+
+    folder = orphan.folder if orphan.folder && Dir.exist?(orphan.folder)
+    target = quarantine_target(orphan) if folder
+    result.triples = sub_triples.length
+    result.metrics_triples = metric_triples.length
+    result.folder = folder
+
+    note, quads = removal_record(orphan, sub_triples, metric_triples, folder, target)
+    write_backup(note, quads)
+    log_removal(note, quads)
+    moved_to = move_folder(folder, target) if folder
+    result.moved_to = moved_to
+    # Metrics first: if the submission delete then fails, the orphan is still there to be found
+    delete_triples(metrics_id(orphan.id), metric_triples, metrics_graph)
+    delete_triples(orphan.id, sub_triples, submission_graph)
+    result.status = :removed
+    result
+  rescue StandardError => e
+    result.status = :error
+    result.message = "#{e.class}: #{e.message}"
+    if moved_to
+      result.message += "; #{put_folder_back(result.folder, moved_to)}"
+      result.moved_to = nil
+    end
+    result
+  end
+
+  # nil while the triples still make an orphan; otherwise why they no longer do
+  def still_linked(triples)
+    typed = triples.any? { |p, o| p == RDF.type && o.to_s == submission_graph.to_s }
+    return nil unless typed
+
+    ontology = OrphanedSubmissionsReport.submission_uri(:ontology)
+    triples.select { |p, _| p == ontology }.map { |_, o| o.to_s }.each do |ont|
+      return "now linked to #{ont}" if ontology_exists?(ont)
+    end
+    nil
+  end
+
+  def ontology_exists?(uri)
+    ontology_type = LinkedData::Models::Ontology.uri_type
+    Goo.sparql_query_client.query("SELECT ?t WHERE { GRAPH <#{ontology_type}> { <#{uri}> a ?t } }")
+                           .any? { |s| s[:t].to_s == ontology_type.to_s }
+  end
+
+  def triples_of(subject, graph)
+    Goo.sparql_query_client.query("SELECT ?p ?o WHERE { GRAPH <#{graph}> { <#{subject}> ?p ?o } }")
+                           .map { |s| [s[:p], s[:o]] }
+  end
+
+  def open_backup(&block)
+    File.open(@backup, File::WRONLY | File::APPEND | File::CREAT, 0o600, &block)
+  end
+
+  # What is removed and where its folder goes, and every quad that gets deleted
+  def removal_record(orphan, sub_triples, metric_triples, folder, target)
+    note = "removing #{orphan.id} (#{orphan.kind}, #{orphan.effect}): " \
+           "#{sub_triples.length} submission triples, #{metric_triples.length} metrics triples"
+    note += ", folder #{folder} -> #{target}" if folder
+    quads = quads(orphan.id, sub_triples, submission_graph) +
+            quads(metrics_id(orphan.id), metric_triples, metrics_graph)
+    [note.delete("\r\n"), quads]
+  end
+
+  # The note as a comment line, then the quads, exactly as stored
+  def write_backup(note, quads)
+    open_backup do |f|
+      f.write("# #{Time.now.utc.iso8601} #{note}\n#{quads.map { |q| "#{q}\n" }.join}")
+      f.flush
+      f.fsync
+    end
+  end
+
+  # The same record in the log, with API keys masked
+  def log_removal(note, quads)
+    @logger.info(OrphanedSubmissionsReport.mask(note.sub(/\Aremoving/, 'Removing')))
+    quads.each { |q| @logger.info("  #{OrphanedSubmissionsReport.mask(q)}") }
+  end
+
+  def quads(subject, triples, graph)
+    triples.map { |p, o| "<#{subject}> #{p.to_ntriples} #{o.to_ntriples} <#{graph}> ." }
+  end
+
+  # delete_data with a graph also invalidates Goo's query cache for that graph
+  def delete_triples(subject, triples, graph)
+    return if triples.empty?
+
+    data = RDF::Graph.new
+    triples.each { |p, o| data << [RDF::URI.new(subject), p, o] }
+    Goo.sparql_update_client.delete_data(data, graph: graph)
+    left = triples_of(subject, graph)
+    raise "#{left.length} triples still stored in #{graph} after the delete" unless left.empty?
+  end
+
+  def quarantine_target(orphan)
+    target = File.join(@quarantine, orphan.acronym, orphan.submission_id)
+    File.exist?(target) ? "#{target}-#{Time.now.utc.strftime('%Y%m%dT%H%M%S.%LZ')}" : target
+  end
+
+  def move_folder(folder, target)
+    FileUtils.mkdir_p(File.dirname(target))
+    FileUtils.mv(folder, target)
+    target
+  end
+
+  def put_folder_back(folder, moved_to)
+    FileUtils.mv(moved_to, folder)
+    "folder moved back to #{folder}"
+  rescue StandardError => e
+    "folder left in #{moved_to} (#{e.class}: #{e.message})"
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  require 'csv'
+
+  # Exit cleanly from an early interrupt; --remove replaces this with a graceful stop
+  Signal.trap("INT") { exit 1 }
+
+  require 'bundler/setup'
+  require 'optparse'
+
+  options = { ontologies: nil, details: false, csv: nil, logfile: nil,
+              remove: false, blocking_only: false, backup: nil, quarantine: nil }
+  OptionParser.new do |opts|
+    opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
+    opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only orphans of these ontologies (default: all)') do |acronyms|
+      options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
+    end
+    opts.on('-d', '--details', 'Also print every triple of each orphan') { options[:details] = true }
+    opts.on('-c', '--csv FILE', 'Also write one row per orphan to FILE') { |file| options[:csv] = file }
+    opts.on('-l', '--logfile FILE', 'Also write the log to FILE (default: a timestamped file in the',
+            'ncbo_cron log directory)') do |file|
+      options[:logfile] = file
+    end
+    opts.separator('')
+    opts.separator('Removing (changes the triplestore and the repository folder):')
+    opts.on('--remove', 'Remove the orphans listed above (needs --backup)') { options[:remove] = true }
+    opts.on('--backup FILE', 'Append the removed triples to FILE as N-Quads') { |file| options[:backup] = file }
+    opts.on('-b', '--blocking-only', 'Only remove orphans that block, or would merge into, their',
+            'ontology\'s next submission') do
+      options[:blocking_only] = true
+    end
+    opts.on('-q', '--quarantine DIR', 'Move orphan folders here (default: <repository>/.orphaned)') do |dir|
+      options[:quarantine] = dir
+    end
+    opts.on('-h', '--help', 'Display this screen') do
+      puts opts
+      exit
+    end
+  end.parse!
+
+  if options[:remove]
+    abort('--remove needs --backup FILE') if options[:backup].to_s.empty?
+  elsif options[:backup] || options[:blocking_only] || options[:quarantine]
+    abort('--backup, --blocking-only and --quarantine only apply with --remove')
+  end
+
+  require_relative '../lib/ncbo_cron'
+  config_exists = File.exist?(File.expand_path('../../config/config.rb', __FILE__))
+  abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+  require_relative '../config/config'
+
+  # Every run keeps a log next to the cron logs, e.g. orphaned-submissions-remove-20261120-131837.log
+  unless options[:logfile]
+    run = options[:remove] ? 'remove' : 'report'
+    options[:logfile] = File.join(File.dirname(NcboCron.settings.log_path),
+                                  "orphaned-submissions-#{run}-#{Time.now.strftime('%Y%m%d-%H%M%S')}.log")
+  end
+  FileUtils.mkdir_p(File.dirname(options[:logfile]))
+
+  outputs = [$stdout, File.open(options[:logfile], 'a')]
+  logger = Logger.new(Class.new {
+    define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
+    define_method(:close) { outputs.drop(1).each(&:close) }
+  }.new)
+
+  Report = OrphanedSubmissionsReport
+  mask = ->(text) { Report.mask(text) }
+
+  logger.info("Triplestore: #{LinkedData.settings.goo_host}, repository: #{LinkedData.settings.repository_folder}")
+  logger.info("Log file: #{File.expand_path(options[:logfile])}")
+  result = Report.new(logger: logger).run(acronyms: options[:ontologies])
+
+  Report::KINDS.each do |kind|
+    orphans = result.by_kind(kind)
+    logger.info("#{kind}: #{orphans.length}")
+    orphans.each do |orphan|
+      logger.info("  #{mask.call(orphan)}")
+      next unless options[:details]
+
+      orphan.triples.each { |p, o| logger.info("      <#{p}> #{mask.call(o.respond_to?(:to_ntriples) ? o.to_ntriples : o)}") }
+    end
+  end
+
+  effects = result.orphans.group_by(&:effect).transform_values(&:length)
+  logger.info("By effect: #{effects.empty? ? 'none' : effects.map { |k, v| "#{k}=#{v}" }.join(', ')}")
+  unless result.other_subjects.empty?
+    logger.info("Not named like a submission, left alone: #{result.other_subjects.length}")
+    result.other_subjects.each { |s| logger.info("  #{s}") } if options[:details]
+  end
+
+  if options[:csv]
+    CSV.open(options[:csv], 'w') do |csv|
+      csv << %w[id acronym submission_id kind effect ontology_exists linked_to highest_linked_id triples
+                status creation_date folder folder_exists upload_file_paths]
+      result.orphans.each do |o|
+        files = o.upload_files.map { |path, exists| "#{path}#{exists ? '' : ' (missing)'}" }.join(' | ')
+        csv << [o.id, o.acronym, o.submission_id, o.kind, o.effect, o.ontology_exists, o.linked_to.join(' | '),
+                o.highest_linked_id, o.triples.length, o.statuses.join('|'), o.creation_date, o.folder,
+                o.folder_exists, mask.call(files)]
+      end
+    end
+    logger.info("Wrote #{result.orphans.length} rows to #{options[:csv]}")
+  end
+
+  if options[:remove]
+    remover = OrphanedSubmissionRemover.new(logger: logger, backup: options[:backup], quarantine: options[:quarantine])
+    Signal.trap("INT") do
+      exit 1 if remover.stop_requested?
+      remover.request_stop
+      warn 'Stopping after the current orphan; press Ctrl-C again to quit now'
+    end
+    remover.remove_from(result, blocking_only: options[:blocking_only])
+    failures = remover.failures
+    logger.error("#{failures.length} orphans need attention:\n  #{failures.join("\n  ")}") unless failures.empty?
+    exit 1 unless failures.empty? && !remover.interrupted?
+
+    logger.info("Rerun #{File.basename(__FILE__)} without --remove to check what's left")
+    exit 0
+  end
+
+  blocking = result.orphans.select { |o| Report::NEXT_SUBMISSION_EFFECTS.include?(o.effect) }
+  unless blocking.empty?
+    list = blocking.map { |o| "#{o.acronym}/#{o.submission_id} (#{o.effect})" }.join(', ')
+    logger.error("#{blocking.length} orphans break their ontology's next submission: #{list}")
+    exit 1
+  end
+end
