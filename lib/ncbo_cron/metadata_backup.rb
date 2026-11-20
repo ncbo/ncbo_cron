@@ -7,9 +7,8 @@ require 'tempfile'
 require 'fileutils'
 require 'digest'
 require 'time'
+require 'set'
 require 'rdf'
-require 'rdf/ntriples'
-require 'rdf/nquads'
 
 module NcboCron
   # Backend-agnostic export/restore of the triplestore "metadata" graphs: the
@@ -23,11 +22,25 @@ module NcboCron
   # Output is one gzipped N-Quads file plus a JSON manifest with per-graph
   # triple counts. N-Quads loads directly into AllegroGraph (agtool load),
   # GraphDB and Virtuoso, and MetadataRestore loads it into any Goo backend.
+  #
+  # Statements are handled as N-Triples/N-Quads lines rather than through
+  # RDF.rb's readers: rdf 3.3.4 treats any line containing "VERSION" (even
+  # inside a literal) as an RDF 1.2 version directive and fails to parse it.
   module MetadataBackup
     SUBMISSION_GRAPH = %r{/ontologies/[^/]+/submissions/\d+\z}.freeze
     # Characters N-Triples/SPARQL do not allow unescaped in an IRI. A dump with
     # these loads into some stores and is rejected by others.
     BAD_IRI_CHARS = /[\x00-\x20<>"{}|^`\\]/.freeze
+    # N-Triples terms. IRIs exclude whitespace and quotes so that a literal
+    # ending in something like `<a href=` is not mistaken for an IRI.
+    IRI = /<[^<>"\s]*>/.source
+    BNODE = /_:[^\s.]+(?:\.[^\s.]+)*/.source
+    LITERAL = /"(?:[^"\\]|\\.)*"(?:@[a-zA-Z]+(?:-[a-zA-Z0-9]+)*|\^\^#{IRI})?/.source
+    STATEMENT = /(#{IRI}|#{BNODE})\s+(#{IRI})\s+(#{IRI}|#{BNODE}|#{LITERAL})/.source
+    # One N-Triples line: subject, predicate, object.
+    TRIPLE = /\A#{STATEMENT}\s*\.\z/.freeze
+    # One N-Quads line: the triple and its graph IRI.
+    QUAD = /\A(#{STATEMENT})\s+<([^<>"\s]*)>\s*\.\z/.freeze
 
     # Registered Goo models whose graph never holds data.
     # OntologyProperty is only the shared base of the Annotation/Object/
@@ -65,9 +78,21 @@ module NcboCron
         JSON.parse(body).dig('results', 'bindings')
       end
 
+      # Distinct triples in the graph. Stores can hold exact duplicate triples
+      # (both 4store and AllegroGraph do), which COUNT(*) includes but CONSTRUCT
+      # returns once. 4store has no sub-selects, so there the distinct rows are
+      # streamed and counted instead.
       def count(graph)
-        rows = select("SELECT (COUNT(*) AS ?c) WHERE { GRAPH <#{graph}> { ?s ?p ?o } }")
+        distinct = "SELECT DISTINCT ?s ?p ?o WHERE { GRAPH <#{graph}> { ?s ?p ?o } }"
+        return count_rows(distinct) if @fourstore
+
+        rows = select("SELECT (COUNT(*) AS ?c) WHERE { #{distinct} }")
         rows.first ? rows.first['c']['value'].to_i : 0
+      end
+
+      # Not ASK: 4store answers true for any GRAPH pattern, even a missing graph.
+      def any?(graph)
+        select("SELECT ?s WHERE { GRAPH <#{graph}> { ?s ?p ?o } } LIMIT 1").any?
       end
 
       def graphs
@@ -81,6 +106,20 @@ module NcboCron
       end
 
       private
+
+      # Rows in a TSV result, which escapes newlines inside values. Skips the
+      # header and any "#" warning lines 4store adds.
+      def count_rows(query)
+        rows = -1
+        pending = +''
+        post(query, 'text/tab-separated-values') do |chunk|
+          pending << chunk
+          *lines, pending = pending.split("\n", -1)
+          rows += lines.count { |l| !l.empty? && !l.start_with?('#') }
+        end
+        rows += 1 unless pending.empty? || pending.start_with?('#')
+        [rows, 0].max
+      end
 
       def post(query, accept)
         req = Net::HTTP::Post.new(@url.request_uri)
@@ -110,7 +149,9 @@ module NcboCron
     end
 
     class Exporter
-      Result = Struct.new(:file, :manifest_file, :manifest, :errors, keyword_init: true)
+      # errors: the dump does not match the store (exit non-zero)
+      # warnings: data that is in the dump but may not load everywhere
+      Result = Struct.new(:file, :manifest_file, :manifest, :errors, :warnings, keyword_init: true)
 
       attr_reader :logger
 
@@ -137,17 +178,18 @@ module NcboCron
         manifest_file = "#{base}.manifest.json"
         partial = "#{file}.partial"
         errors = []
+        warnings = []
         graph_stats = {}
         started = Time.now
 
         logger.info("Exporting #{@graphs.size} metadata graphs from #{@sparql.url} to #{file}")
         File.open(partial, 'wb') do |raw|
           gz = Zlib::GzipWriter.new(raw)
-          writer = RDF::NQuads::Writer.new(gz, validate: false)
           @graphs.each do |graph|
-            stats = export_graph(graph, writer)
+            stats = export_graph(graph, gz)
             graph_stats[graph] = stats
             errors.concat(stats.delete(:errors))
+            warnings.concat(stats.delete(:warnings))
           end
           gz.finish
         end
@@ -166,12 +208,14 @@ module NcboCron
           graphs: graph_stats
         }
         manifest[:unlisted_graphs] = audit_graphs if @audit
+        manifest[:warnings] = warnings unless warnings.empty?
         manifest[:errors] = errors unless errors.empty?
         File.write(manifest_file, JSON.pretty_generate(manifest))
 
         logger.info("Wrote #{manifest[:triples]} triples in #{manifest[:duration_seconds]}s (#{File.size(file)} bytes)")
+        warnings.each { |w| logger.warn(w) }
         errors.each { |e| logger.error(e) }
-        Result.new(file: file, manifest_file: manifest_file, manifest: manifest, errors: errors)
+        Result.new(file: file, manifest_file: manifest_file, manifest: manifest, errors: errors, warnings: warnings)
       rescue StandardError
         FileUtils.rm_f(partial) if partial
         raise
@@ -181,63 +225,84 @@ module NcboCron
 
       # Fetches the graph into a temp file and checks it against a COUNT before
       # anything reaches the dump, so a retry never leaves duplicates behind.
-      def export_graph(graph, writer)
-        graph_name = RDF::URI(graph)
+      def export_graph(graph, out)
         Tempfile.create(['graph', '.nt'], binmode: true) do |tmp|
-          expected, reader, stats = nil
+          expected, stats = nil
           2.times do |attempt|
             tmp.truncate(0)
             tmp.rewind
             expected = @sparql.count(graph)
-            reader = reader_for(@sparql.construct_graph(graph, tmp))
+            check_content_type(@sparql.construct_graph(graph, tmp))
             tmp.flush
-            stats = scan(tmp, reader)
+            stats = scan(tmp)
             break if stats[:triples] == expected
 
             # A write landing between COUNT and CONSTRUCT shifts the numbers.
             logger.warn("#{graph}: counted #{expected}, fetched #{stats[:triples]}; retrying") if attempt.zero?
           end
 
-          tmp.rewind
-          reader.new(tmp, validate: false).each_statement do |st|
-            st.graph_name = graph_name
-            writer.write_statement(st)
-          end
+          suffix = " <#{graph}> .\n"
+          each_triple(tmp) { |s, p, o| out.write("#{s} #{p} #{o}#{suffix}") }
 
           errors = []
           if stats[:triples] != expected
             errors << "#{graph}: endpoint reports #{expected} triples but #{stats[:triples]} were exported"
           end
-          if stats[:bnodes].positive?
-            errors << "#{graph}: #{stats[:bnodes]} triples use blank nodes, which do not survive a restore intact"
+          unless stats[:malformed].empty?
+            errors << "#{graph}: #{stats[:malformed].size} lines are not N-Triples and were skipped, " \
+                      "e.g. #{stats[:malformed].first[0, 200]}"
           end
-          unless stats[:bad_iris].empty?
-            errors << "#{graph}: IRIs with characters other stores reject, e.g. #{stats[:bad_iris].first(5).join('; ')}"
+          warnings = []
+          if stats[:bnodes].positive?
+            warnings << "#{graph}: #{stats[:bnodes]} triples use blank nodes, which do not survive a restore intact"
+          end
+          if stats[:bad_iri_count].positive?
+            warnings << "#{graph}: #{stats[:bad_iri_count]} triples have IRIs with characters SPARQL and " \
+                        "N-Triples forbid; a restore will skip them. E.g. #{stats[:bad_iris].first(3).join('; ')}"
           end
           logger.info("#{graph}: #{stats[:triples]} triples")
-          { triples: stats[:triples], errors: errors }
+          { triples: stats[:triples], errors: errors, warnings: warnings }
         end
       end
 
-      def scan(io, reader)
+      def each_triple(io, malformed = nil)
         io.rewind
-        stats = { triples: 0, bnodes: 0, bad_iris: [] }
-        reader.new(io, validate: false).each_statement do |st|
-          terms = [st.subject, st.predicate, st.object]
+        io.each_line do |line|
+          line = line.force_encoding(Encoding::UTF_8).strip
+          next if line.empty? || line.start_with?('#')
+
+          if (m = TRIPLE.match(line))
+            yield m[1], m[2], m[3]
+          elsif malformed
+            malformed << line
+          end
+        end
+      end
+
+      def scan(io)
+        stats = { triples: 0, bnodes: 0, bad_iri_count: 0, bad_iris: [], malformed: [] }
+        each_triple(io, stats[:malformed]) do |s, p, o|
           stats[:triples] += 1
-          stats[:bnodes] += 1 if terms.any?(&:node?)
-          bad = terms.find { |t| t.uri? && t.to_s.match?(BAD_IRI_CHARS) }
-          stats[:bad_iris] << "#{st.subject} -> #{bad}" if bad && stats[:bad_iris].size < 20
+          stats[:bnodes] += 1 if s.start_with?('_:') || o.start_with?('_:')
+          bad = [s, p, o].find { |t| t.start_with?('<') && unescape(t[1..-2]).match?(BAD_IRI_CHARS) }
+          next unless bad
+
+          stats[:bad_iri_count] += 1
+          stats[:bad_iris] << "#{s} -> #{bad}" if stats[:bad_iris].size < 20
         end
         stats
       end
 
-      def reader_for(content_type)
-        mime = content_type.to_s.split(';').first.to_s.strip.downcase
-        return RDF::NTriples::Reader if mime.empty? || %w[application/n-triples text/plain].include?(mime)
+      # 4store writes characters such as spaces in IRIs as \\u0020 escapes.
+      def unescape(iri)
+        iri.gsub(/\\u(\h{4})|\\U(\h{8})/) { [(Regexp.last_match(1) || Regexp.last_match(2)).hex].pack('U') }
+      end
 
-        RDF::Reader.for(content_type: mime) or
-          raise Error, "endpoint answered CONSTRUCT with #{mime}, which no loaded RDF reader handles"
+      def check_content_type(content_type)
+        mime = content_type.to_s.split(';').first.to_s.strip.downcase
+        return if mime.empty? || %w[application/n-triples text/plain].include?(mime)
+
+        raise Error, "endpoint answered CONSTRUCT with #{mime} instead of N-Triples"
       end
 
       def audit_graphs
@@ -291,7 +356,7 @@ module NcboCron
         raise Error, "no graphs to restore from #{@file}" if targets.empty?
 
         unless @dry_run
-          occupied = targets.select { |g| @sparql.count(g).positive? }
+          occupied = targets.select { |g| @sparql.any?(g) }
           if occupied.any? && !@replace
             raise Error, "#{occupied.size} target graphs already contain data (e.g. #{occupied.first}); " \
                          'pass --replace to drop and reload them'
@@ -310,19 +375,19 @@ module NcboCron
           batch = []
         end
 
-        each_quad do |st|
-          g = st.graph_name.to_s
+        malformed = 0
+        each_quad(-> { malformed += 1 }) do |triple, g|
           next unless targets.include?(g)
 
           if g != current
             flush.call
             current = g
           end
-          st.graph_name = nil
-          batch << st
+          batch << triple
           flush.call if batch.size >= @batch_size
         end
         flush.call
+        errors << "#{malformed} lines in #{@file} are not N-Quads and were skipped" if malformed.positive?
 
         summary = targets.to_h do |g|
           actual = @dry_run ? loaded[g] : @sparql.count(g)
@@ -343,34 +408,51 @@ module NcboCron
           JSON.parse(File.read(manifest))['graphs'].transform_values { |s| s['triples'] }
         else
           counts = Hash.new(0)
-          each_quad { |st| counts[st.graph_name.to_s] += 1 }
-          counts.delete('')
+          each_quad { |_triple, graph| counts[graph] += 1 }
           counts
         end
       end
 
-      def each_quad(&block)
+      # Yields each statement as [N-Triples text without the final ".", graph IRI].
+      def each_quad(on_malformed = nil)
         File.open(@file, 'rb') do |raw|
           io = @file.end_with?('.gz') ? Zlib::GzipReader.new(raw) : raw
-          RDF::NQuads::Reader.new(io, validate: false).each_statement(&block)
+          io.each_line do |line|
+            line = line.force_encoding(Encoding::UTF_8).strip
+            next if line.empty? || line.start_with?('#')
+
+            if (m = QUAD.match(line))
+              yield m[1], m[5]
+            elsif on_malformed
+              on_malformed.call
+            end
+          end
         end
       end
 
-      # Loads through SPARQL UPDATE (INSERT DATA), the same path Goo uses to save
-      # models, so it behaves the same on every backend. A failing batch is split
-      # until the offending triples are isolated; the rest still load.
-      def insert(graph, statements, errors)
-        return statements.size if @dry_run
+      # A SPARQL UPDATE string that also carries the graph it writes, which
+      # Goo's client needs to invalidate its query cache for that graph.
+      InsertData = Struct.new(:graph, :triples) do
+        def options = { graph: graph }
+        def to_s = "INSERT DATA { GRAPH <#{graph}> {\n#{triples.map { |t| "#{t} ." }.join("\n")}\n} }"
+      end
 
-        Goo.sparql_update_client.insert_data(RDF::Graph.new.insert(*statements), graph: RDF::URI(graph))
-        statements.size
+      # Loads through SPARQL UPDATE (INSERT DATA), the same path Goo uses to save
+      # models, so it behaves the same on every backend. N-Triples terms are
+      # valid SPARQL, so lines are sent as they appear in the dump. A failing
+      # batch is split until the offending triples are isolated; the rest load.
+      def insert(graph, triples, errors)
+        return triples.size if @dry_run
+
+        Goo.sparql_update_client.update(InsertData.new(graph, triples))
+        triples.size
       rescue StandardError => e
-        if statements.size == 1
-          errors << "#{graph}: could not load #{statements.first.to_nquads.strip}: #{e.message[0, 200]}"
+        if triples.size == 1
+          errors << "#{graph}: could not load #{triples.first[0, 300]}: #{e.message[0, 200]}"
           return 0
         end
-        half = statements.size / 2
-        insert(graph, statements[0...half], errors) + insert(graph, statements[half..], errors)
+        half = triples.size / 2
+        insert(graph, triples[0...half], errors) + insert(graph, triples[half..], errors)
       end
     end
   end

@@ -55,4 +55,4 @@ result = NcboCron::MetadataBackup::Exporter.new(
 ).run
 
 puts result.file
-exit(result.errors.empty? ? 0 : 1)
+exit(result.errors.empty? ? 0 : 1) # warnings alone do not fail the run

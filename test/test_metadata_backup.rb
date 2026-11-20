@@ -16,11 +16,19 @@ class TestMetadataBackup < TestCase
     [
       RDF::Literal.new(%(back\\slash "quoted"\nnew line\ttab)),
       RDF::Literal.new('café ünïcødé 日本語 😀'),
+      # rdf 3.3.4's N-Triples reader fails on any line containing VERSION
+      RDF::Literal.new("ALPHA VERSION\r\n\r\nStarting point"),
+      # Literals that look like IRIs or statement ends to a naive line parser
+      RDF::Literal.new('We need someone with experience <a href='),
+      RDF::Literal.new('see <http://example.org/x> .'),
       RDF::Literal.new('hello', language: :en),
       RDF::Literal.new('2026-11-20T00:00:00Z', datatype: RDF::XSD.dateTime),
       RDF::URI('http://test.ontoportal.org/other')
     ].each { |o| tricky << [s, p, o] }
     Goo.sparql_update_client.insert_data(tricky, graph: RDF::URI(FIDELITY_GRAPH))
+    # AllegroGraph stores this a second time; CONSTRUCT and the count must agree
+    Goo.sparql_update_client.insert_data(RDF::Graph.new << [s, p, RDF::Literal.new('hello', language: :en)],
+                                         graph: RDF::URI(FIDELITY_GRAPH))
   end
 
   def after_all
@@ -121,10 +129,11 @@ class TestMetadataBackup < TestCase
     MB::Restorer.new(file: file, logger: @logger, **opts)
   end
 
-  # Canonical, order-independent view of a graph for comparison
+  # Order-independent view of a graph for comparison (the store serialises
+  # the same triples the same way before and after a restore)
   def dump_graph(graph)
     io = StringIO.new
     MB::Sparql.new.construct_graph(graph, io)
-    RDF::NTriples::Reader.new(io.string).each_statement.map(&:to_ntriples).sort
+    io.string.force_encoding(Encoding::UTF_8).lines.map(&:strip).reject(&:empty?).sort
   end
 end
