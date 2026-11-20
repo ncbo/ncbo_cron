@@ -1,0 +1,381 @@
+#!/usr/bin/env ruby
+
+# One-off migration: compresses the uploaded files of old submissions (gzip by default,
+# zip with --archive-type zip) and points their uploadFilePath/masterFileName at the
+# archive, so downloads and processing read the compressed file.
+#
+# The archiver (OntologySubmissionArchiver) already zips an uploaded file of 100MB or
+# more when it archives a submission. This catches up on what it missed: submissions
+# archived before it did that, files under its threshold, and UMLS submissions created
+# before bin/create_umls_submissions.rb started writing them gzipped.
+#
+# Only archived submissions are compressed unless --include-unarchived is given; their
+# triples are already deleted. The latest submission is the one most people download,
+# and the one the diff of the next submission reads, which fails on a compressed file.
+# Even with --include-unarchived, a submission that is not archived and has a
+# pullLocation is left alone: the pull compares the latest submission's file with the
+# remote one byte for byte, so a compressed file would look changed on every pull.
+#
+# Each archive is checked to decompress to the original bytes before the submission is
+# repointed, and the original is deleted only after the new path is read back from the
+# triplestore. Skipped: submissions waiting in the processing queue, and files outside the
+# submission's own folder in the repository (another submission may use them). Safe to
+# re-run: submissions that are already compressed are left alone.
+#
+#   bin/migrations/compress_submissions -o GO-PLUS --dryrun
+#   bin/migrations/compress_submissions -g UMLS
+#   bin/migrations/compress_submissions --all --min-size 100MB --archive-type zip
+#
+# Everything is in this file so the migration can be deleted once it has run.
+# test/test_submission_compressor.rb loads it without running the command line.
+
+require 'logger'
+require 'fileutils'
+
+class SubmissionCompressor
+  FAILED = %i[missing invalid error].freeze
+  ARCHIVE_TYPES = %w[gz zip].freeze
+
+  Result = Struct.new(:acronym, :submission_id, :status, :message, :size_before, :size_after,
+                      keyword_init: true) do
+    def failed?
+      FAILED.include?(status)
+    end
+
+    def to_s
+      line = "#{acronym}/#{submission_id}: #{status}"
+      line += " (#{message})" if message
+      line += " #{SubmissionCompressor.human_size(size_before)}" if size_before
+      line += " -> #{SubmissionCompressor.human_size(size_after)}" if size_after
+      line
+    end
+  end
+
+  attr_reader :results
+
+  # group:  only ontologies in this group (acronym), e.g. UMLS
+  # format: only submissions in this ontology format (acronym), e.g. OWL
+  # min_size: leave files smaller than this many bytes alone
+  # include_unarchived: also compress submissions that are not archived, the latest included,
+  #                     except those with a pullLocation
+  # archive_type: 'gz' (gzip) or 'zip' (what the archiver writes)
+  def initialize(logger: Logger.new($stdout), dry_run: false, keep_original: false, redis: nil,
+                 group: nil, format: nil, min_size: 0, include_unarchived: false, archive_type: 'gz')
+    raise ArgumentError, "Unknown archive type #{archive_type.inspect}" unless ARCHIVE_TYPES.include?(archive_type)
+
+    @logger = logger
+    @dry_run = dry_run
+    @keep_original = keep_original
+    @redis = redis
+    @group = group
+    @format = format
+    @min_size = min_size
+    @include_unarchived = include_unarchived
+    @archive_type = archive_type
+    @results = []
+  end
+
+  # acronyms limits the run to those ontologies; nil means every ontology that passes the
+  # group and format filters
+  def run(acronyms: nil)
+    @results = []
+    submissions = select_submissions(acronyms)
+    @logger.info("Found #{submissions.length} submissions to check#{' (dry run)' if @dry_run}")
+
+    submissions.each do |sub|
+      result = compress(sub)
+      @results << result
+      result.failed? ? @logger.error(result.to_s) : @logger.info(result.to_s)
+    end
+    @logger.info(summary)
+    @results
+  end
+
+  def compress(sub)
+    sub.bring(:uploadFilePath, :masterFileName, :submissionId) if sub.bring?(:uploadFilePath)
+    path = sub.uploadFilePath&.to_s
+
+    return result(sub, :no_file, 'no uploadFilePath') if path.nil? || path.empty?
+    return missing(sub, path) unless File.file?(path)
+    return result(sub, :already_compressed, File.basename(path)) if sub.zipped?(path)
+    return result(sub, :pulled, 'not archived and has a pullLocation') if pulled_and_unarchived?(sub)
+    return result(sub, :outside_folder, "#{path} is not in #{sub.data_folder}") unless own_file?(sub, path)
+
+    size_before = File.size(path)
+    if size_before < @min_size
+      return result(sub, :too_small, File.basename(path), size_before: size_before)
+    end
+    return result(sub, :queued, 'queued for processing, run again once it is processed') if queued?(sub)
+    return result(sub, :would_compress, path, size_before: size_before) if @dry_run
+
+    archive_path = if @archive_type == 'zip'
+                     LinkedData::Utils::FileHelpers.zip_file(path)
+                   else
+                     LinkedData::Utils::FileHelpers.gzip_file(path)
+                   end
+    repoint(sub, path, archive_path, size_before)
+  rescue StandardError => e
+    result(sub, :error, "#{e.class}: #{e.message}")
+  end
+
+  def summary
+    counts = @results.group_by(&:status).transform_values(&:length)
+    lines = ["Submission compression summary:"]
+    counts.sort_by { |status, _| status.to_s }.each { |status, n| lines << "  #{status}: #{n}" }
+
+    compressed = @results.select { |r| r.status == :compressed }
+    unless compressed.empty?
+      before = compressed.sum(&:size_before)
+      after = compressed.sum(&:size_after)
+      lines << "  space freed: #{self.class.human_size(before - after)} " \
+               "(#{self.class.human_size(before)} -> #{self.class.human_size(after)})"
+    end
+
+    pending = @results.select { |r| r.status == :would_compress }
+    lines << "  to compress: #{self.class.human_size(pending.sum(&:size_before))}" unless pending.empty?
+    lines.join("\n")
+  end
+
+  def failures
+    @results.select(&:failed?)
+  end
+
+  def self.human_size(bytes)
+    units = %w[B KB MB GB TB]
+    size = bytes.to_f
+    unit = 0
+    while size >= 1024 && unit < units.length - 1
+      size /= 1024
+      unit += 1
+    end
+    format(unit.zero? ? '%d %s' : '%.1f %s', size, units[unit])
+  end
+
+  # "100MB", "1.5G", "512k" or a plain number of bytes
+  def self.parse_size(text)
+    match = text.to_s.strip.match(/\A(\d+(?:\.\d+)?)\s*([kmgt]?)b?\z/i)
+    raise ArgumentError, "Invalid size: #{text.inspect}" unless match
+
+    power = { '' => 0, 'k' => 1, 'm' => 2, 'g' => 3, 't' => 4 }[match[2].downcase]
+    (match[1].to_f * (1024**power)).to_i
+  end
+
+  private
+
+  def repoint(sub, path, archive_path, size_before)
+    sub.bring_remaining
+    old_master = sub.masterFileName
+    sub.uploadFilePath = archive_path
+    sub.masterFileName = LinkedData::Utils::FileHelpers.filenames_in_archive(archive_path).first
+
+    unless sub.valid?
+      sub.uploadFilePath = path
+      sub.masterFileName = old_master
+      FileUtils.rm_f(archive_path)
+      return result(sub, :invalid, "not saved: #{sub.errors.inspect}")
+    end
+
+    begin
+      sub.save
+    rescue StandardError
+      # The store may hold either path now, or neither if the save failed between
+      # its delete and its insert. Keep both files unless it still holds the original.
+      FileUtils.rm_f(archive_path) if stored_upload_path(sub) == path
+      raise
+    end
+
+    stored = stored_upload_path(sub)
+    unless stored == archive_path
+      return result(sub, :error, "uploadFilePath reads back as #{stored.inspect} after saving; " \
+                                 "kept #{path} and #{archive_path}")
+    end
+
+    FileUtils.rm_f(path) unless @keep_original
+    result(sub, :compressed, File.basename(archive_path), size_before: size_before, size_after: File.size(archive_path))
+  end
+
+  def select_submissions(acronyms)
+    model = LinkedData::Models::OntologySubmission
+    query = @format ? model.where(hasOntologyLanguage: ontology_format) : model.where
+    subs = query.include(:submissionId, :uploadFilePath, :masterFileName, :pullLocation, submissionStatus: [:code],
+                         ontology: [:acronym])
+                .all
+    subs = without_broken(subs)
+
+    subs = in_group(subs) if @group
+    subs = named(subs, acronyms) if acronyms
+
+    unless @include_unarchived
+      unarchived = subs.reject(&:archived?)
+      unless unarchived.empty?
+        @logger.info("Skipping #{unarchived.length} submissions that are not archived " \
+                     "(--include-unarchived compresses them too)")
+      end
+      subs -= unarchived
+    end
+    subs.sort_by { |s| [s.ontology.acronym, s.submissionId] }
+  end
+
+  # Submissions whose ontology is gone, or whose submissionId is missing or not an
+  # integer, can't be matched to a repository folder. They are listed and left alone.
+  def without_broken(subs)
+    broken, ok = subs.partition { |s| acronym_of(s).nil? || !s.submissionId.is_a?(Integer) }
+    unless broken.empty?
+      @logger.warn("Skipping #{broken.length} submissions with no ontology or no integer submissionId:\n  " \
+                   "#{broken.map { |s| s.id.to_s }.sort.join("\n  ")}")
+    end
+    ok
+  end
+
+  def acronym_of(sub)
+    sub.ontology&.acronym
+  rescue Goo::Base::AttributeNotLoaded
+    nil
+  end
+
+  def ontology_format
+    format = LinkedData::Models::OntologyFormat.find(@format).first
+    raise ArgumentError, "Ontology format #{@format} not found" if format.nil?
+
+    format
+  end
+
+  def in_group(subs)
+    group = LinkedData::Models::Group.find(@group).first
+    raise ArgumentError, "Group #{@group} not found" if group.nil?
+
+    members = LinkedData::Models::Ontology.where(group: group).include(:acronym).all.map(&:acronym)
+    outside = subs.map { |s| s.ontology.acronym }.uniq.reject { |acr| members.include?(acr) }.sort
+    unless outside.empty?
+      @logger.info("Skipping #{outside.length} ontologies outside the #{@group} group: #{outside.join(', ')}")
+    end
+    subs.select { |s| members.include?(s.ontology.acronym) }
+  end
+
+  def named(subs, acronyms)
+    wanted = acronyms.map(&:upcase)
+    subs = subs.select { |s| wanted.include?(s.ontology.acronym.upcase) }
+    found = subs.map { |s| s.ontology.acronym.upcase }.uniq
+    (wanted - found).each { |acr| @logger.warn("#{acr}: no submissions found that match the filters") }
+    subs
+  end
+
+  # Files are copied into repository/ACRONYM/SUBMISSION_ID. A path anywhere else may be
+  # shared with another submission, which deleting the original would break.
+  def own_file?(sub, path)
+    folder = sub.data_folder.to_s
+    return false unless File.directory?(folder)
+
+    File.realpath(path).start_with?(File.realpath(folder) + File::SEPARATOR)
+  end
+
+  # The archiver deletes the original before the submission is saved, so a failed save
+  # leaves the store pointing at a file that is gone, next to the archive it wrote.
+  def missing(sub, path)
+    leftovers = %w[.zip .gz].map { |ext| "#{path}#{ext}" }.select { |p| File.file?(p) }
+    message = "#{path} not found"
+    message += "; found #{leftovers.map { |p| File.basename(p) }.join(', ')} next to it" unless leftovers.empty?
+    result(sub, :missing, message)
+  end
+
+  # OntologyHelper.new_file_exists? hashes the latest submission's uploadFilePath and
+  # compares it with the downloaded remote file
+  def pulled_and_unarchived?(sub)
+    sub.bring(:pullLocation) if sub.bring?(:pullLocation)
+    !sub.pullLocation.nil? && !sub.archived?
+  end
+
+  def queued?(sub)
+    redis.hexists(NcboCron::Helpers::OntologyHelper::PROCESS_QUEUE_HOLDER,
+                  NcboCron::Helpers::OntologyHelper.get_prefixed_id(sub.id))
+  end
+
+  def redis
+    @redis ||= Redis.new(host: NcboCron.settings.redis_host, port: NcboCron.settings.redis_port)
+  end
+
+  def stored_upload_path(sub)
+    stored = LinkedData::Models::OntologySubmission.find(sub.id).include(:uploadFilePath).first
+    stored&.uploadFilePath&.to_s
+  end
+
+  def result(sub, status, message = nil, size_before: nil, size_after: nil)
+    Result.new(acronym: sub.ontology.acronym, submission_id: sub.submissionId, status: status,
+               message: message, size_before: size_before, size_after: size_after)
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  # Exit cleanly from an early interrupt
+  Signal.trap("INT") { exit 1 }
+
+  require 'bundler/setup'
+  require 'optparse'
+
+  options = { dry_run: false, keep_original: false, ontologies: nil, logfile: nil, group: nil,
+              format: nil, min_size: 0, include_unarchived: false, all: false, archive_type: 'gz' }
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: #{File.basename(__FILE__)} (-o ACRONYMS | -g GROUP | -f FORMAT | --all) [options]"
+    opts.on('-o', '--ontologies ACRONYM[,ACRONYM,...]', 'Only these ontologies') do |acronyms|
+      options[:ontologies] = acronyms.split(',').map(&:strip).reject(&:empty?)
+    end
+    opts.on('-g', '--group ACRONYM', 'Only ontologies in this group, e.g. UMLS') { |group| options[:group] = group }
+    opts.on('-f', '--format ACRONYM', 'Only submissions in this format, e.g. OWL') { |format| options[:format] = format }
+    opts.on('-a', '--all', 'Every ontology') { options[:all] = true }
+    opts.on('-s', '--min-size SIZE', 'Leave files smaller than SIZE alone, e.g. 100MB (default: 0)') do |size|
+      options[:min_size] = SubmissionCompressor.parse_size(size)
+    end
+    opts.on('-u', '--include-unarchived', 'Also compress submissions that are not archived, the latest included, ' \
+                                                'unless they have a pullLocation') do
+      options[:include_unarchived] = true
+    end
+    opts.on('-d', '--dryrun', 'List what would be compressed; change nothing') { options[:dry_run] = true }
+    opts.on('-t', '--archive-type TYPE', SubmissionCompressor::ARCHIVE_TYPES,
+            "gz or zip (default: gz; the archiver writes zip)") { |type| options[:archive_type] = type }
+    opts.on('-k', '--keep-original', 'Keep the uncompressed file next to the archive') { options[:keep_original] = true }
+    opts.on('-l', '--logfile FILE', 'Also write the log to FILE') { |file| options[:logfile] = file }
+    opts.on('-h', '--help', 'Display this screen') do
+      puts opts
+      exit
+    end
+  end
+  begin
+    parser.parse!
+  rescue OptionParser::ParseError, ArgumentError => e
+    abort("#{e.message}\n\n#{parser}")
+  end
+
+  unless options[:all] || options[:ontologies] || options[:group] || options[:format]
+    abort("Say which ontologies to compress with -o, -g, -f or --all\n\n#{parser}")
+  end
+
+  require_relative '../../lib/ncbo_cron'
+  config_exists = File.exist?(File.expand_path('../../../config/config.rb', __FILE__))
+  abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
+  require_relative '../../config/config'
+
+  outputs = [$stdout]
+  outputs << File.open(options[:logfile], 'a') if options[:logfile]
+  logger = Logger.new(Class.new {
+    define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
+    define_method(:close) { outputs.drop(1).each(&:close) }
+  }.new)
+
+  logger.info("Repository: #{LinkedData.settings.repository_folder}; triplestore: #{LinkedData.settings.goo_host}")
+
+  compressor = SubmissionCompressor.new(logger: logger,
+                                        dry_run: options[:dry_run],
+                                        keep_original: options[:keep_original],
+                                        group: options[:group],
+                                        format: options[:format],
+                                        min_size: options[:min_size],
+                                        include_unarchived: options[:include_unarchived],
+                                        archive_type: options[:archive_type])
+  compressor.run(acronyms: options[:ontologies])
+
+  failures = compressor.failures
+  unless failures.empty?
+    logger.error("#{failures.length} submissions need attention:\n  #{failures.join("\n  ")}")
+    exit 1
+  end
+end
