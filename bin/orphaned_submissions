@@ -33,8 +33,10 @@
 #   4. deletes the Metrics triples, then the submission triples, and checks they're gone (this
 #      also clears Goo's query cache for the graph). If a delete fails the folder is moved back,
 #      and whatever is left is found again by the next run.
-# Each result is logged as it happens. The log goes to stdout and to --logfile, which defaults
-# to <backup>.log with --remove. Healthy submissions and ontologies are never touched. Run
+# Each result is logged as it happens. Every run, with or without --remove, logs to stdout and
+# to --logfile, which defaults to orphaned-submissions-<report|remove>-<YYYYMMDD-HHMMSS>.log in
+# the ncbo_cron log directory (the directory of NcboCron.settings.log_path). Healthy
+# submissions and ontologies are never touched. Run
 # --remove when the ontology pull isn't running: the pull writes into the folder of the id a
 # blocking orphan holds. Ctrl-C during --remove stops after the current orphan; press it again
 # to quit at once.
@@ -46,7 +48,12 @@
 #        http://<host>:10035/repositories/<repo>/statements
 # and move the folders back out of the quarantine folder (the comment lines say which).
 #
-# Exit codes: without --remove, 1 when an orphan blocks new submissions of an ontology;
+# --blocking-only removes just the orphans that break an ontology's next submission: typed ones
+# holding the next id (blocks_next_submission) and untyped ones holding it
+# (merges_into_next_submission).
+#
+# Exit codes: without --remove, 1 when an orphan blocks or would merge into an ontology's next
+# submission;
 # with --remove, 1 when an orphan couldn't be removed or the run was interrupted. Otherwise 0.
 #
 # Everything is in this file; tests load it without running the command line.
@@ -74,16 +81,19 @@ require 'time'
 #
 #   :blocks_next_submission  typed, and holds the next id: Goo rejects every new submission
 #                            (pull or upload) as a duplicate
+#   :merges_into_next_submission  untyped, and holds the next id: its triples will be added to
+#                            the ontology's next submission (pull or upload)
 #   :blocks_later            typed, above the next id: blocks once the ontology gets there
-#   :merges_into_new         untyped, at or above the next id: its triples will be added to the
-#                            new submission that gets this id
+#   :merges_later            untyped, above the next id: merges once the ontology gets there
 #   :ontology_deleted        the ontology its URI names no longer exists
 #   :none                    below the highest id, or not a numeric id, so no new submission
 #                            will reuse it
 #
+# NEXT_SUBMISSION_EFFECTS are the ones that break the ontology's next submission.
 # Nothing is written to the triplestore or the repository folder.
 class OrphanedSubmissionsReport
   KINDS = %i[unlinked dangling untyped].freeze
+  NEXT_SUBMISSION_EFFECTS = %i[blocks_next_submission merges_into_next_submission].freeze
   PAGE_SIZE = 10_000
   SUBMISSION_PATH = %r{\A(.+/ontologies/([^/]+))/submissions/([^/]+)\z}.freeze
   # What a repository folder name may look like; anything else never gets a folder
@@ -235,9 +245,11 @@ class OrphanedSubmissionsReport
     next_id = (highest_id || 0) + 1
     id = submission_id.to_i
     return :none if id < next_id
-    return :merges_into_new if kind == :untyped
-
-    id == next_id ? :blocks_next_submission : :blocks_later
+    if kind == :untyped
+      id == next_id ? :merges_into_next_submission : :merges_later
+    else
+      id == next_id ? :blocks_next_submission : :blocks_later
+    end
   end
 
   # Same rule as Ontology#next_submission_id: only typed submissions linked to the ontology count
@@ -357,14 +369,16 @@ class OrphanedSubmissionRemover
     @interrupted
   end
 
-  # blocking_only: only orphans that block their ontology's next submission
+  # blocking_only: only orphans that block, or would merge into, their ontology's next submission
   def run(acronyms: nil, blocking_only: false)
     remove_from(@report.run(acronyms: acronyms), blocking_only: blocking_only)
   end
 
   def remove_from(report_result, blocking_only: false)
     orphans = report_result.orphans
-    orphans = orphans.select { |o| o.effect == :blocks_next_submission } if blocking_only
+    if blocking_only
+      orphans = orphans.select { |o| OrphanedSubmissionsReport::NEXT_SUBMISSION_EFFECTS.include?(o.effect) }
+    end
     remove(orphans)
   end
 
@@ -543,14 +557,16 @@ if $PROGRAM_NAME == __FILE__
     end
     opts.on('-d', '--details', 'Also print every triple of each orphan') { options[:details] = true }
     opts.on('-c', '--csv FILE', 'Also write one row per orphan to FILE') { |file| options[:csv] = file }
-    opts.on('-l', '--logfile FILE', 'Also write the log to FILE (with --remove, default: BACKUP.log)') do |file|
+    opts.on('-l', '--logfile FILE', 'Also write the log to FILE (default: a timestamped file in the',
+            'ncbo_cron log directory)') do |file|
       options[:logfile] = file
     end
     opts.separator('')
     opts.separator('Removing (changes the triplestore and the repository folder):')
     opts.on('--remove', 'Remove the orphans listed above (needs --backup)') { options[:remove] = true }
     opts.on('--backup FILE', 'Append the removed triples to FILE as N-Quads') { |file| options[:backup] = file }
-    opts.on('-b', '--blocking-only', 'Only remove orphans that block their ontology\'s next submission') do
+    opts.on('-b', '--blocking-only', 'Only remove orphans that block, or would merge into, their',
+            'ontology\'s next submission') do
       options[:blocking_only] = true
     end
     opts.on('-q', '--quarantine DIR', 'Move orphan folders here (default: <repository>/.orphaned)') do |dir|
@@ -564,7 +580,6 @@ if $PROGRAM_NAME == __FILE__
 
   if options[:remove]
     abort('--remove needs --backup FILE') if options[:backup].to_s.empty?
-    options[:logfile] ||= "#{options[:backup]}.log"
   elsif options[:backup] || options[:blocking_only] || options[:quarantine]
     abort('--backup, --blocking-only and --quarantine only apply with --remove')
   end
@@ -574,8 +589,15 @@ if $PROGRAM_NAME == __FILE__
   abort("Please create a config/config.rb file using the config/config.rb.sample as a template") unless config_exists
   require_relative '../config/config'
 
-  outputs = [$stdout]
-  outputs << File.open(options[:logfile], 'a') if options[:logfile]
+  # Every run keeps a log next to the cron logs, e.g. orphaned-submissions-remove-20261120-131837.log
+  unless options[:logfile]
+    run = options[:remove] ? 'remove' : 'report'
+    options[:logfile] = File.join(File.dirname(NcboCron.settings.log_path),
+                                  "orphaned-submissions-#{run}-#{Time.now.strftime('%Y%m%d-%H%M%S')}.log")
+  end
+  FileUtils.mkdir_p(File.dirname(options[:logfile]))
+
+  outputs = [$stdout, File.open(options[:logfile], 'a')]
   logger = Logger.new(Class.new {
     define_method(:write) { |msg| outputs.each { |o| o.write(msg); o.flush } }
     define_method(:close) { outputs.drop(1).each(&:close) }
@@ -585,7 +607,7 @@ if $PROGRAM_NAME == __FILE__
   mask = ->(text) { Report.mask(text) }
 
   logger.info("Triplestore: #{LinkedData.settings.goo_host}, repository: #{LinkedData.settings.repository_folder}")
-  logger.info("Log file: #{File.expand_path(options[:logfile])}") if options[:logfile]
+  logger.info("Log file: #{File.expand_path(options[:logfile])}")
   result = Report.new(logger: logger).run(acronyms: options[:ontologies])
 
   Report::KINDS.each do |kind|
@@ -636,9 +658,10 @@ if $PROGRAM_NAME == __FILE__
     exit 0
   end
 
-  blocking = result.by_effect(:blocks_next_submission)
+  blocking = result.orphans.select { |o| Report::NEXT_SUBMISSION_EFFECTS.include?(o.effect) }
   unless blocking.empty?
-    logger.error("#{blocking.length} orphans block new submissions: #{blocking.map { |o| "#{o.acronym}/#{o.submission_id}" }.join(', ')}")
+    list = blocking.map { |o| "#{o.acronym}/#{o.submission_id} (#{o.effect})" }.join(', ')
+    logger.error("#{blocking.length} orphans break their ontology's next submission: #{list}")
     exit 1
   end
 end

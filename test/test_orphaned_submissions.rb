@@ -102,17 +102,25 @@ class TestOrphanedSubmissionsReport < TestCase
                  [orphan.acronym, orphan.kind, orphan.effect, orphan.highest_linked_id]
   end
 
-  def test_untyped_fragment_above_the_highest_id_merges_into_the_next_submission
+  def test_untyped_fragment_holding_the_next_id_merges_into_the_next_submission
     fragment = RDF::URI.new("#{@prefix}/submissions/4")
     insert(fragment, LEGACY_HOMEPAGE, RDF::Literal.new('http://homepage.example.org'))
     insert(fragment, UPLOAD_FILE_PATH, RDF::Literal.new('/no/such/file.owl'))
 
     orphan = only_orphan(report.run)
 
-    assert_equal ['4', :untyped, :merges_into_new, 3], [orphan.submission_id, orphan.kind, orphan.effect,
-                                                        orphan.highest_linked_id]
+    assert_equal ['4', :untyped, :merges_into_next_submission, 3],
+                 [orphan.submission_id, orphan.kind, orphan.effect, orphan.highest_linked_id]
     assert_equal [['/no/such/file.owl', false]], orphan.upload_files
     refute orphan.folder_exists
+  end
+
+  def test_untyped_fragment_above_the_next_id_merges_later
+    insert(RDF::URI.new("#{@prefix}/submissions/6"), LEGACY_HOMEPAGE, RDF::Literal.new('http://h.example.org'))
+
+    orphan = only_orphan(report.run)
+
+    assert_equal ['6', :untyped, :merges_later], [orphan.submission_id, orphan.kind, orphan.effect]
   end
 
   def test_fragment_of_a_deleted_ontology_is_reported
@@ -305,6 +313,17 @@ class TestOrphanedSubmissionRemover < TestCase
     new_sub.submissionId = ont.next_submission_id
     assert_equal 3, new_sub.submissionId
     assert new_sub.valid?, new_sub.errors.inspect
+  end
+
+  def test_blocking_only_also_removes_a_fragment_holding_the_next_id
+    insert(sub_uri(3), ONTOLOGY, @ont.id) # healthy again, so the next id is 4
+    insert(sub_uri(4), LEGACY_HOMEPAGE, RDF::Literal.new('http://homepage.example.org'))
+
+    results = remover.run(blocking_only: true)
+
+    assert_equal [[sub_uri(4).to_s, :merges_into_next_submission, :removed]],
+                 results.map { |r| [r.id, r.effect, r.status] }
+    assert_equal [sub_uri(5).to_s, GONE].sort, report.run.orphans.map(&:id).sort
   end
 
   def test_only_named_ontologies_are_removed
