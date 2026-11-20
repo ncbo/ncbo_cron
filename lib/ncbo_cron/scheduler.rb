@@ -1,4 +1,5 @@
 require 'logger'
+require 'socket'
 
 # Scheduling/lock gems
 require 'redis-lock'
@@ -8,12 +9,20 @@ require 'rufus/scheduler'
 module NcboCron
   class Scheduler
     ##
+    # Value stored in the lock's owner key. redis-lock only extends or releases
+    # a lock whose owner matches, so it must be unique per process holding it;
+    # otherwise one host can release or extend another host's lock.
+    def self.lock_owner(job_name)
+      "ncbo_cron:#{Socket.gethostname}:#{Process.pid}:#{job_name}"
+    end
+
+    ##
     # Schedule a job with redis-supported locking
     # options:
     #   life: length in seconds of the initial lock
     #   job_name: the scheduled job's name
     #   logger: a logger to track errors/debug output
-    #   relock_preiod: number of seconds to re-lock for, holds lock during job
+    #   relock_period: seconds between lock extensions while the job runs (default: life - 15)
     #   redis_host: hostname where redis lock will be performed
     #   redis_port: port for redis host
     #   process: a proc that can be run
@@ -24,7 +33,7 @@ module NcboCron
       lock_life       = options[:life] || 10*60
       job_name        = options[:job_name] || "ncbo_cron"
       logger          = options[:logger] || Logger.new($stdout)
-      relock_period   = options[:relock_period] || lock_life - 15
+      relock_period   = options[:relock_period] || [lock_life - 15, 1].max
       redis_host      = options[:redis_host] || "localhost"
       redis_port      = options[:redis_port] || 6379
       process         = options[:process]
@@ -50,29 +59,38 @@ module NcboCron
 
       scheduler.send(scheduler_type, interval, {:allow_overlapping => false}) do
         begin
-          redis.lock(job_name, life: lock_life, owner: "ncbo_cron") do
+          # Computed in the scheduling process; the forked child reuses it
+          owner = lock_owner(job_name)
+          redis.lock(job_name, life: lock_life, owner: owner) do
             pid = fork do
               $0 = job_name # rename the process
+              exit_status = 0
               begin
                 logger.debug("#{job_name} -- Lock acquired"); logger.flush
 
-                # Spawn a thread to re-acquire the lock every 60 seconds
-                Thread.new do
-                  sleep(relock_period) do
-                    logger.debug("Re-locking for #{lock_life}")
-                    lock.extend_life(lock_life)
-                  end
-                end
+                # Keep extending the lock while the job runs so that a job
+                # outlasting lock_life isn't treated as stale by another host.
+                start_relock_thread(job_name, owner, redis_host, redis_port, lock_life, relock_period, logger)
 
                 # Run the process if we have a job
                 yield if block_given?
                 process.call if process
+              rescue SystemExit => e
+                exit_status = e.status
+              rescue Exception => e
+                exit_status = 1
+                backtrace = (e.backtrace || []).first(10).join("\n\t")
+                logger.error("#{job_name} -- Job failed: #{e.class}: #{e.message}\n\t#{backtrace}")
               ensure
-                Kernel.exit!
+                logger.flush rescue nil
+                Kernel.exit!(exit_status)
               end
             end
             logger.debug("#{job_name} -- running in pid #{pid}"); logger.flush
-            Process.wait(pid)
+            _, status = Process.wait2(pid)
+            unless status.success?
+              logger.error("#{job_name} -- pid #{pid} exited with #{status.inspect}"); logger.flush
+            end
           end
         rescue Redis::Lock::LockNotAcquired
           # Expected when another worker holds the lock; don't spam error logs.
@@ -82,6 +100,30 @@ module NcboCron
 
       # Wait for scheduling (don't exit)
       scheduler.join
+    end
+
+    ##
+    # Runs in the forked job process: every relock_period seconds, push the
+    # lock's expiration out to now + lock_life. Uses its own Redis connection
+    # rather than the parent's, and a Redis::Lock with the same key/owner as
+    # the one acquired by the parent (redis-lock only extends a lock whose
+    # owner matches). Stops if the lock can no longer be extended.
+    def self.start_relock_thread(job_name, owner, redis_host, redis_port, lock_life, relock_period, logger)
+      Thread.new do
+        begin
+          lock = Redis::Lock.new(Redis.new(host: redis_host, port: redis_port),
+                                 job_name, life: lock_life, owner: owner)
+          loop do
+            sleep(relock_period)
+            logger.debug("#{job_name} -- Re-locking for #{lock_life}s"); logger.flush
+            lock.extend_life(lock_life)
+          end
+        rescue Redis::Lock::LockNotAcquired
+          logger.error("#{job_name} -- Lost lock; could not extend it"); logger.flush
+        rescue StandardError => e
+          logger.error("#{job_name} -- Re-lock thread failed: #{e.class}: #{e.message}"); logger.flush
+        end
+      end
     end
   end
 end
