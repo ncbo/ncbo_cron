@@ -22,14 +22,17 @@ elsif LinkedData.settings.goo_host.include? "prod"
 end
 puts "Running on #{platform} platform"
 
-umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
-
-Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
-  next if File.exist?("#{ttl}.gz")
-  puts "Compressing #{ttl} ..."
-  LinkedData::Utils::FileHelpers.gzip_file(ttl)
+# umls2rdf writes each UMLS release into its own subfolder, e.g. output/2026AB.
+umls_output_path = "/srv/ontoportal/share/scratch/umls2rdf/output"
+release = ARGV[0].to_s.strip.upcase
+if release.empty?
+  available = Dir.glob(File.join(umls_output_path, "*")).select { |d| File.directory?(d) }
+                 .map { |d| File.basename(d) }.sort
+  abort("Usage: #{File.basename($0)} <UMLS release, e.g. 2026AB>\n" \
+        "Releases in #{umls_output_path}: #{available.empty? ? 'none' : available.join(', ')}")
 end
-umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
+umls_files_path = File.join(umls_output_path, release)
+abort("#{umls_files_path} not found") unless File.directory?(umls_files_path)
 
 # Version and release date come from umls2rdf's output, not from this
 # script. Metadata extraction during processing takes them from each
@@ -44,6 +47,18 @@ unless File.exist?(manifest_path)
 end
 umls_version = JSON.parse(File.read(manifest_path))["umls_version"]
 abort("#{manifest_path} has no umls_version") if umls_version.to_s.empty?
+unless umls_version.to_s.upcase == release
+  abort("#{manifest_path} is for UMLS #{umls_version}, not #{release}")
+end
+
+# Compress each export, and again when it was re-exported after its .gz was made.
+Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
+  gz = "#{ttl}.gz"
+  next if File.exist?(gz) && File.mtime(gz) >= File.mtime(ttl)
+  puts "Compressing #{ttl} ..."
+  LinkedData::Utils::FileHelpers.gzip_file(ttl)
+end
+umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
 
 # dcterms:issued from the ontology header at the top of a gzipped umls2rdf
 # file, as YYYY-MM-DD, or nil when the header has none.
