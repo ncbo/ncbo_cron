@@ -6,7 +6,6 @@ Signal.trap("INT") { exit 1 }
 # Setup the bundled gems in our environment
 require 'bundler/setup'
 require 'json'
-require 'zlib'
 
 # Configure the process for the current cron configuration.
 require_relative '../lib/ncbo_cron'
@@ -34,13 +33,9 @@ end
 umls_files_path = File.join(umls_output_path, release)
 abort("#{umls_files_path} not found") unless File.directory?(umls_files_path)
 
-# Version and release date come from umls2rdf's output, not from this
-# script. Metadata extraction during processing takes them from each
-# file's ontology header: version from owl:versionInfo (the source's own
-# version) and released from dcterms:issued (the UMLS release date, written
-# by umls2rdf v1.3.0 and later). The semantic types file has no header, so
-# STY gets the UMLS version from umls2rdf_manifest.json and the release date
-# from the other files' headers.
+# Version and release date are not set here. Metadata extraction takes them
+# from each file's ontology header: owl:versionInfo and dcterms:issued
+# (umls2rdf v1.4.0 and later; earlier exports have no STY header).
 manifest_path = File.join(umls_files_path, "umls2rdf_manifest.json")
 unless File.exist?(manifest_path)
   abort("#{manifest_path} not found: the umls2rdf export is missing or incomplete")
@@ -59,20 +54,6 @@ Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
   LinkedData::Utils::FileHelpers.gzip_file(ttl)
 end
 umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
-
-# dcterms:issued from the ontology header at the top of a gzipped umls2rdf
-# file, as YYYY-MM-DD, or nil when the header has none.
-def umls_release_date(gz_path)
-  Zlib::GzipReader.open(gz_path) do |gz|
-    gz.each_line do |line|
-      match = line.match(/dcterms:issued\s+"(\d{4}-\d{2}-\d{2})"/)
-      return match[1] if match
-      # The header ends before the first class.
-      return nil if line.include?("owl:Class")
-    end
-  end
-  nil
-end
 
 file_index = {}
 umls_files.each do |x|
@@ -111,36 +92,10 @@ file_index.each do |acr,file_path|
   end
 end
 puts "#{new_submissions.length} new files mapped to ontologies"
-
-release_dates = {}
-new_submissions.each do |acr, (_ont, _sub, file_path)|
-  next if acr == "STY"
-  release_dates[acr] = umls_release_date(file_path)
-end
-undated = release_dates.select { |_acr, date| date.nil? }.keys
-unless undated.empty?
-  abort("No dcterms:issued in the header of #{undated.sort.join(', ')}. " \
-        "Export with umls2rdf v1.3.0 or later.")
-end
-distinct_dates = release_dates.values.uniq
-if distinct_dates.length > 1
-  abort("The files disagree on the UMLS release date (#{distinct_dates.sort.join(', ')}). " \
-        "Are they from more than one export?")
-end
-umls_released = distinct_dates.first
-if new_submissions.key?("STY") && umls_released.nil?
-  abort("STY needs a release date from at least one other file's header")
-end
-puts "UMLS #{umls_version}, released #{umls_released || 'unknown'}"
-
 pull = NcboCron::Helpers::OntologyHelper
 new_submissions.each_key do |acr|
   ont, sub, file = new_submissions[acr]
   filename = file.split("/")[-1]
-  if acr == "STY"
-    pull.create_submission(ont, sub, file, filename, nil, true, umls_version, umls_released)
-  else
-    pull.create_submission(ont, sub, file, filename, nil, true)
-  end
+  pull.create_submission(ont, sub, file, filename, nil, true)
   puts "Created new submission for #{acr}"
 end
