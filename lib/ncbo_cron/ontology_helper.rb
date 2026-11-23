@@ -156,6 +156,7 @@ module NcboCron
         new_sub.missingImports = nil
         new_sub.masterFileName = nil
         new_sub.metrics = nil
+        new_sub.diffFilePath = nil
         full_file_path = File.expand_path(file_location)
 
         # check if OWLAPI is able to parse the file before creating a new submission

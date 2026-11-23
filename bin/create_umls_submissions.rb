@@ -5,6 +5,7 @@ Signal.trap("INT") { exit 1 }
 
 # Setup the bundled gems in our environment
 require 'bundler/setup'
+require 'json'
 
 # Configure the process for the current cron configuration.
 require_relative '../lib/ncbo_cron'
@@ -20,19 +21,39 @@ elsif LinkedData.settings.goo_host.include? "prod"
 end
 puts "Running on #{platform} platform"
 
-umls_files_path = "/srv/ncbo/share/scratch/umls2rdf/output"
+# umls2rdf writes each UMLS release into its own subfolder, e.g. output/2026AB.
+umls_output_path = "/srv/ontoportal/share/scratch/umls2rdf/output"
+release = ARGV[0].to_s.strip.upcase
+if release.empty?
+  available = Dir.glob(File.join(umls_output_path, "*")).select { |d| File.directory?(d) }
+                 .map { |d| File.basename(d) }.sort
+  abort("Usage: #{File.basename($0)} <UMLS release, e.g. 2026AB>\n" \
+        "Releases in #{umls_output_path}: #{available.empty? ? 'none' : available.join(', ')}")
+end
+umls_files_path = File.join(umls_output_path, release)
+abort("#{umls_files_path} not found") unless File.directory?(umls_files_path)
 
+# Version and release date are not set here. Metadata extraction takes them
+# from each file's ontology header: owl:versionInfo and dcterms:issued
+# (umls2rdf v1.4.0 and later; earlier exports have no STY header).
+manifest_path = File.join(umls_files_path, "umls2rdf_manifest.json")
+unless File.exist?(manifest_path)
+  abort("#{manifest_path} not found: the umls2rdf export is missing or incomplete")
+end
+umls_version = JSON.parse(File.read(manifest_path))["umls_version"]
+abort("#{manifest_path} has no umls_version") if umls_version.to_s.empty?
+unless umls_version.to_s.upcase == release
+  abort("#{manifest_path} is for UMLS #{umls_version}, not #{release}")
+end
+
+# Compress each export, and again when it was re-exported after its .gz was made.
 Dir.glob(File.join(umls_files_path, "*.ttl")).each do |ttl|
-  next if File.exist?("#{ttl}.gz")
+  gz = "#{ttl}.gz"
+  next if File.exist?(gz) && File.mtime(gz) >= File.mtime(ttl)
   puts "Compressing #{ttl} ..."
   LinkedData::Utils::FileHelpers.gzip_file(ttl)
 end
 umls_files = Dir.glob(File.join(umls_files_path, "*.ttl.gz"))
-
-# UMLS Release Details.  Update this for new release
-new_version = "2023AB"
-# Release date in YYYY-MM-DD format
-new_released = "2023-11-06"
 
 file_index = {}
 umls_files.each do |x|
@@ -75,7 +96,6 @@ pull = NcboCron::Helpers::OntologyHelper
 new_submissions.each_key do |acr|
   ont, sub, file = new_submissions[acr]
   filename = file.split("/")[-1]
-  pull.create_submission(ont,sub,file,filename,logger=nil,
-                         add_to_pull=true,new_version,new_released)
+  pull.create_submission(ont, sub, file, filename, nil, true)
   puts "Created new submission for #{acr}"
 end

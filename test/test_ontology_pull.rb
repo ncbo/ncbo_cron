@@ -382,6 +382,19 @@ class TestOntologyPull < TestCase
     LinkedData.settings.umls_owlapi_parse = old_setting
   end
 
+  # The diff report belongs to the submission it was made for
+  def test_create_submission_does_not_copy_diff_file_path
+    ont, sub = init_ontology_for_create("UMLS")
+    sub.diffFilePath = File.join(sub.data_folder, 'bubastis_diff.xml')
+    sub.save
+
+    new_sub = create_submission_from_file(ont, sub)
+
+    assert_new_submission_saved(ont, new_sub)
+    new_sub = LinkedData::Models::OntologySubmission.find(new_sub.id).include(:diffFilePath).first
+    assert_nil new_sub.diffFilePath
+  end
+
   def test_create_submission_checks_other_formats_with_owlapi
     ont, sub = init_ontology_for_create("OWL")
     LinkedData::Models::OntologySubmission.any_instance.expects(:parsable?).once.returns(false)
